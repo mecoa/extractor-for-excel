@@ -6,131 +6,164 @@ from .engine import OcrEngine, OcrResult
 
 
 class MineruFlashEngine(OcrEngine):
+    """Agent 轻量解析 API — 免 Token，≤10MB/20页，签名上传"""
+
     def __init__(self, token: str = "", base_url: str = "https://mineru.net/api/v1/agent"):
         self.token = token
         self.base_url = base_url
 
-    def _upload_and_parse(self, file_path: str) -> OcrResult:
-        file_name = os.path.basename(file_path)
-        with open(file_path, "rb") as f:
-            files = {"file": (file_name, f, "application/pdf")}
-            headers = {}
-            if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
-            resp = httpx.post(
-                f"{self.base_url}/parse/file",
-                files=files,
-                headers=headers,
-                timeout=120,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("code") != 0:
-            return OcrResult("", "", error=data.get("msg", "unknown error"))
-        result = data.get("data", {})
-        markdown = result.get("markdown", "")
-        return OcrResult(markdown=markdown, raw_data=json.dumps(data, ensure_ascii=False), page_count=1)
-
     def parse(self, file_path: str) -> OcrResult:
-        return self._upload_and_parse(file_path)
+        file_name = os.path.basename(file_path)
+        try:
+            step1 = httpx.post(
+                f"{self.base_url}/parse/file",
+                json={"file_name": file_name, "language": "ch", "is_ocr": True, "enable_table": True},
+                timeout=30,
+            )
+            step1.raise_for_status()
+            data = step1.json()
+            if data.get("code") != 0:
+                return OcrResult("", "", error=data.get("msg", "create task failed"))
+
+            task_id = data["data"]["task_id"]
+            file_url = data["data"]["file_url"]
+
+            with open(file_path, "rb") as f:
+                put_resp = httpx.put(file_url, content=f.read(), timeout=120)
+                put_resp.raise_for_status()
+
+            for _ in range(60):
+                poll_resp = httpx.get(
+                    f"{self.base_url}/parse/{task_id}",
+                    timeout=15,
+                )
+                poll_resp.raise_for_status()
+                poll_data = poll_resp.json()
+                state = poll_data["data"]["state"]
+                if state == "done":
+                    markdown_url = poll_data["data"]["markdown_url"]
+                    md_resp = httpx.get(markdown_url, timeout=30)
+                    md_resp.raise_for_status()
+                    return OcrResult(
+                        markdown=md_resp.text,
+                        raw_data=json.dumps(poll_data, ensure_ascii=False),
+                        page_count=1,
+                    )
+                elif state == "failed":
+                    return OcrResult("", "", error=poll_data["data"].get("err_msg", "parse failed"))
+                time.sleep(2)
+            return OcrResult("", "", error="timeout")
+        except Exception as e:
+            return OcrResult("", "", error=str(e))
 
     def batch_parse(self, file_paths: list[str]) -> list[OcrResult]:
-        results = []
-        for fp in file_paths:
-            try:
-                results.append(self.parse(fp))
-            except Exception as e:
-                results.append(OcrResult("", "", error=str(e)))
-        return results
+        return [self.parse(fp) for fp in file_paths]
 
 
 class MineruPrecisionEngine(OcrEngine):
+    """精准解析 API — 需 Token，≤200MB/200页，批量上传"""
+
     def __init__(self, token: str, base_url: str = "https://mineru.net/api/v4"):
         self.token = token
         self.base_url = base_url
-        self._headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
 
     def parse(self, file_path: str) -> OcrResult:
-        import hashlib
-        file_name = os.path.basename(file_path)
-        file_size = os.path.getsize(file_path)
-        data_id = hashlib.md5(file_path.encode()).hexdigest()[:16]
-
-        raw_resp = httpx.post(
-            f"{self.base_url}/file-urls/upload",
-            headers=self._headers,
-            json={
-                "data_id": data_id,
-                "file_name": file_name,
-                "file_size": file_size,
-            },
-            timeout=30,
-        )
-        raw_resp.raise_for_status()
-        upload_info = raw_resp.json()
-        if upload_info.get("code") != 0:
-            return OcrResult("", "", error=upload_info.get("msg", "upload failed"))
-        upload_data = upload_info["data"]
-
-        with open(file_path, "rb") as f:
-            upload_resp = httpx.put(
-                upload_data["upload_url"],
-                content=f,
-                headers={"Content-Type": "application/octet-stream"},
-                timeout=300,
-            )
-        upload_resp.raise_for_status()
-
-        task_resp = httpx.post(
-            f"{self.base_url}/extract/task",
-            headers=self._headers,
-            json={
-                "url": upload_data["url"],
-                "data_id": data_id,
-                "is_ocr": True,
-                "enable_table": True,
-                "enable_formula": False,
-            },
-            timeout=30,
-        )
-        task_resp.raise_for_status()
-        task_data = task_resp.json()
-        if task_data.get("code") != 0:
-            return OcrResult("", "", error=task_data.get("msg", "task creation failed"))
-        task_id = task_data["data"]["task_id"]
-
-        for _ in range(60):
-            status_resp = httpx.get(
-                f"{self.base_url}/extract/task-status",
-                headers=self._headers,
-                params={"task_id": task_id},
-                timeout=15,
-            )
-            status_resp.raise_for_status()
-            status_data = status_resp.json()
-            state = status_data["data"]["state"]
-            if state == "done":
-                result = status_data["data"]["result"]
-                markdown = result.get("markdown", "")
-                full = json.dumps(status_data["data"], ensure_ascii=False)
-                return OcrResult(markdown=markdown, raw_data=full, page_count=result.get("page_count", 0))
-            elif state == "failed":
-                return OcrResult("", "", error=status_data["data"].get("error", "parse failed"))
-            time.sleep(2)
-
-        return OcrResult("", "", error="timeout")
+        results = self.batch_parse([file_path])
+        return results[0]
 
     def batch_parse(self, file_paths: list[str]) -> list[OcrResult]:
-        results = []
-        for fp in file_paths:
-            try:
-                results.append(self.parse(fp))
-            except Exception as e:
-                results.append(OcrResult("", "", error=str(e)))
+        if not file_paths:
+            return []
+        results: list[OcrResult] = [OcrResult("", "", error="pending") for _ in file_paths]
+
+        try:
+            files_payload = []
+            for fp in file_paths:
+                files_payload.append({"name": os.path.basename(fp)})
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.token}",
+            }
+
+            step1 = httpx.post(
+                f"{self.base_url}/file-urls/batch",
+                headers=headers,
+                json={"files": files_payload, "model_version": "vlm", "is_ocr": True, "enable_table": True},
+                timeout=30,
+            )
+            step1.raise_for_status()
+            data1 = step1.json()
+            if data1.get("code") != 0:
+                error_msg = data1.get("msg", "batch create failed")
+                return [OcrResult("", "", error=error_msg) for _ in file_paths]
+
+            batch_id = data1["data"]["batch_id"]
+            upload_urls = data1["data"]["file_urls"]
+
+            for i, fp in enumerate(file_paths):
+                if i >= len(upload_urls):
+                    results[i] = OcrResult("", "", error="no upload url")
+                    continue
+                try:
+                    with open(fp, "rb") as f:
+                        put_resp = httpx.put(upload_urls[i], content=f.read(), timeout=120)
+                        put_resp.raise_for_status()
+                except Exception as e:
+                    results[i] = OcrResult("", "", error=f"upload: {e}")
+
+            for _ in range(120):
+                poll_resp = httpx.get(
+                    f"https://mineru.net/api/v4/extract-results/batch/{batch_id}",
+                    headers=headers,
+                    timeout=15,
+                )
+                poll_resp.raise_for_status()
+                poll_data = poll_resp.json()
+                extract = poll_data["data"].get("extract_result", [])
+
+                all_done = True
+                for ei, er in enumerate(extract):
+                    state = er.get("state")
+                    if state == "done" and results[ei].markdown == "" and "pending" in results[ei].error:
+                        zip_url = er.get("full_zip_url", "")
+                        if zip_url:
+                            try:
+                                zip_resp = httpx.get(zip_url, timeout=60)
+                                zip_resp.raise_for_status()
+                                markdown = self._extract_markdown(zip_resp.content)
+                                results[ei] = OcrResult(
+                                    markdown=markdown,
+                                    raw_data=json.dumps(er, ensure_ascii=False),
+                                    page_count=1,
+                                )
+                            except Exception as e:
+                                results[ei] = OcrResult("", "", error=f"download: {e}")
+                    elif state == "failed":
+                        if results[ei].markdown == "" and "pending" in results[ei].error:
+                            results[ei] = OcrResult("", "", error=er.get("err_msg", "failed"))
+                    elif state != "done":
+                        all_done = False
+
+                if all_done:
+                    break
+                time.sleep(3)
+
+        except Exception as e:
+            for i in range(len(results)):
+                if results[i].markdown == "" and "pending" in results[i].error:
+                    results[i] = OcrResult("", "", error=str(e))
+
         return results
+
+    def _extract_markdown(self, zip_bytes: bytes) -> str:
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            for name in zf.namelist():
+                if name.endswith("full.md"):
+                    return zf.read(name).decode("utf-8", errors="replace")
+        return ""
 
 
 def create_engine(token: str = "", use_precision: bool = False) -> OcrEngine:

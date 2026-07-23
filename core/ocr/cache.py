@@ -8,7 +8,7 @@ from models.ocr_cache import OcrCacheEntry, OcrStatus
 class OcrCache:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 
@@ -53,15 +53,7 @@ class OcrCache:
         ).fetchone()
         if row is None:
             return None
-        return OcrCacheEntry(
-            file_path=row["file_path"],
-            file_name=row["file_name"],
-            status=OcrStatus(row["status"]),
-            markdown=row["markdown"],
-            raw_data=row["raw_data"],
-            error=row["error"],
-            page_count=row["page_count"],
-        )
+        return self._row_to_entry(row)
 
     def list_by_status(self, status: OcrStatus) -> List[OcrCacheEntry]:
         rows = self._conn.execute(

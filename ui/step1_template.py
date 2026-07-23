@@ -22,7 +22,7 @@ class TemplatePage(QWidget):
         title = QLabel("Excel 模板配置")
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333; margin-bottom: 4px;")
         layout.addWidget(title)
-        subtitle = QLabel("选择要提取的字段，填写字段说明和示例值（将作为 LLM 提示词）")
+        subtitle = QLabel("勾选要使用的字段，填写提取说明。勾选「已有值参考」= 把该行已有数据注入 LLM 作为背景信息")
         subtitle.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
         layout.addWidget(subtitle)
 
@@ -36,9 +36,16 @@ class TemplatePage(QWidget):
         layout.addLayout(top)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["使用", "字段名", "字段说明 (→ LLM)", "示例值", "注入上下文"])
+        self.table.setHorizontalHeaderLabels(["使用", "字段名", "提取说明（发送给 LLM）", "示例值", "已有值参考"])
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.setToolTip(
+            "使用：是否参与当前任务\n"
+            "字段名：Excel 列名\n"
+            "提取说明：告诉 LLM 这个字段要提取什么内容\n"
+            "示例值：可能的枚举值，帮助 LLM 判断\n"
+            "已有值参考：勾选则把 Excel 该行已有值注入 LLM 作为背景（如科目名称、摘要）"
+        )
         layout.addWidget(self.table)
 
     def _open_excel(self):

@@ -94,8 +94,9 @@ class ReviewPage(QWidget):
 
         splitter = QSplitter(Qt.Vertical)
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["行号", "文件名", "状态"])
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["", "行号", "文件名", "状态"])
+        self.table.setColumnWidth(0, 30)
         self.table.itemClicked.connect(self._show_row_detail)
         splitter.addWidget(self.table)
 
@@ -117,12 +118,18 @@ class ReviewPage(QWidget):
 
     def initializePage(self):
         matched = [r for r in self.project.match_results if r["matched"]]
+        selected_set = set(self.project.selected_rows) if self.project.selected_rows else set(r["row_index"] for r in matched)
         self.table.setRowCount(len(matched))
         for i, r in enumerate(matched):
-            self.table.setItem(i, 0, QTableWidgetItem(str(r["row_index"])))
-            self.table.setItem(i, 1, QTableWidgetItem(os.path.basename(r["file_path"])))
-            status_item = QTableWidgetItem("待提取")
-            self.table.setItem(i, 2, status_item)
+            ridx = r["row_index"]
+            cb = QTableWidgetItem()
+            cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cb.setCheckState(Qt.Checked if ridx in selected_set else Qt.Unchecked)
+            self.table.setItem(i, 0, cb)
+            self.table.setItem(i, 1, QTableWidgetItem(str(ridx)))
+            self.table.setItem(i, 2, QTableWidgetItem(os.path.basename(r["file_path"])))
+            status_text = "✅ 已提取" if ridx in self.results else "待提取"
+            self.table.setItem(i, 3, QTableWidgetItem(status_text))
 
     def _llm_settings(self):
         from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox
@@ -151,12 +158,28 @@ class ReviewPage(QWidget):
             self.project.update_llm_config(url_input.text(), key_input.text(), model_input.text())
             self.llm_config_label.setText(f"✓ {model_input.text()}")
 
+    def _get_selected_rows(self):
+        selected = []
+        for i in range(self.table.rowCount()):
+            if self.table.item(i, 0) and self.table.item(i, 0).checkState() == Qt.Checked:
+                try:
+                    selected.append(int(self.table.item(i, 1).text()))
+                except (ValueError, AttributeError):
+                    pass
+        self.project.selected_rows = selected
+        return selected
+
     def _start_extract(self):
         if not self.project.llm_config.get("base_url"):
             QMessageBox.warning(self, "提示", "请先配置 LLM")
             return
 
-        matched = [r for r in self.project.match_results if r["matched"]]
+        selected_indices = self._get_selected_rows()
+        if not selected_indices:
+            QMessageBox.warning(self, "提示", "请选择要处理的行")
+            return
+
+        matched = [r for r in self.project.match_results if r["matched"] and r["row_index"] in selected_indices]
         db_path = self.project.cache_db_path()
         ocr_cache = OcrCache(db_path)
         reader = ExcelReader(self.project.excel_path)
@@ -184,13 +207,12 @@ class ReviewPage(QWidget):
 
     def _on_result(self, row_idx: int, data: dict):
         self.results[row_idx] = data
-        # update table status
         for i in range(self.table.rowCount()):
-            if self.table.item(i, 0).text() == str(row_idx):
+            if self.table.item(i, 1) and self.table.item(i, 1).text() == str(row_idx):
                 if "_error" in data:
-                    self.table.setItem(i, 2, QTableWidgetItem(f"❌ {data.get('_error', '')}"))
+                    self.table.setItem(i, 3, QTableWidgetItem(f"❌ {data.get('_error', '')}"))
                 else:
-                    self.table.setItem(i, 2, QTableWidgetItem("✅ 已提取"))
+                    self.table.setItem(i, 3, QTableWidgetItem("✅ 已提取"))
                 break
 
     def _on_extract_finished(self):
@@ -201,7 +223,7 @@ class ReviewPage(QWidget):
 
     def _show_row_detail(self, item):
         row = item.row()
-        row_idx_str = self.table.item(row, 0).text()
+        row_idx_str = self.table.item(row, 1).text()
         if row_idx_str not in self.results:
             return
 

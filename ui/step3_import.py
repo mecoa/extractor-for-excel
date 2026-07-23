@@ -82,9 +82,10 @@ class ImportPage(QWidget):
         self.progress = QProgressBar()
         layout.addWidget(self.progress)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["行号", "文件名", "状态", "页数", "错误信息"])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["", "行号", "文件名", "状态", "页数", "错误信息"])
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 30)
         layout.addWidget(self.table)
 
         self.preview_label = QLabel("OCR 文本预览（点击行查看）")
@@ -101,31 +102,51 @@ class ImportPage(QWidget):
 
     def _refresh_table(self):
         matched = [r for r in self.project.match_results if r["matched"]]
+        selected_set = set(self.project.selected_rows) if self.project.selected_rows else set(r["row_index"] for r in matched)
         self.table.setRowCount(len(matched))
         for i, r in enumerate(matched):
-            self.table.setItem(i, 0, QTableWidgetItem(str(r["row_index"])))
-            self.table.setItem(i, 1, QTableWidgetItem(os.path.basename(r["file_path"])))
+            ridx = r["row_index"]
+            cb = QTableWidgetItem()
+            cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cb.setCheckState(Qt.Checked if ridx in selected_set else Qt.Unchecked)
+            self.table.setItem(i, 0, cb)
+            self.table.setItem(i, 1, QTableWidgetItem(str(ridx)))
+            self.table.setItem(i, 2, QTableWidgetItem(os.path.basename(r["file_path"])))
 
             db_path = self.project.cache_db_path()
             if db_path and os.path.exists(db_path):
                 cache = OcrCache(db_path)
                 entry = cache.get(r["file_path"])
                 if entry:
-                    self.table.setItem(i, 2, QTableWidgetItem(entry.status.value))
-                    self.table.setItem(i, 3, QTableWidgetItem(str(entry.page_count)))
-                    self.table.setItem(i, 4, QTableWidgetItem(entry.error or ""))
+                    self.table.setItem(i, 3, QTableWidgetItem(entry.status.value))
+                    self.table.setItem(i, 4, QTableWidgetItem(str(entry.page_count)))
+                    self.table.setItem(i, 5, QTableWidgetItem(entry.error or ""))
                 else:
-                    self.table.setItem(i, 2, QTableWidgetItem("pending"))
+                    self.table.setItem(i, 3, QTableWidgetItem("pending"))
                 cache.close()
             else:
-                self.table.setItem(i, 2, QTableWidgetItem("pending"))
+                self.table.setItem(i, 3, QTableWidgetItem("pending"))
+
+    def _get_selected_files(self):
+        files = []
+        checked = set()
+        for i in range(self.table.rowCount()):
+            if self.table.item(i, 0) and self.table.item(i, 0).checkState() == Qt.Checked:
+                try:
+                    row_idx = int(self.table.item(i, 1).text())
+                    checked.add(row_idx)
+                except (ValueError, AttributeError):
+                    pass
+        self.project.selected_rows = list(checked)
+        for r in self.project.match_results:
+            if r["matched"] and r["row_index"] in checked:
+                files.append(r["file_path"])
+        return files
 
     def _start_ocr(self):
-        matched = [r for r in self.project.match_results if r["matched"]]
-        file_paths = [r["file_path"] for r in matched]
-
+        file_paths = self._get_selected_files()
         if not file_paths:
-            QMessageBox.warning(self, "提示", "没有匹配的 PDF 文件")
+            QMessageBox.warning(self, "提示", "没有选中的 PDF 文件")
             return
 
         db_path = self.project.cache_db_path()
@@ -161,7 +182,7 @@ class ImportPage(QWidget):
 
     def _show_preview(self, item):
         row = item.row()
-        file_path_item = self.table.item(row, 1)
+        file_path_item = self.table.item(row, 2)
         if not file_path_item:
             return
         db_path = self.project.cache_db_path()

@@ -29,6 +29,10 @@ class MatchingPage(QWidget):
         subtitle.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
         layout.addWidget(subtitle)
 
+        hints = QLabel("提示：在 Step 1 中勾选「使用」且未标记为「已有值参考」的字段会出现在这里")
+        hints.setStyleSheet("font-size: 11px; color: #999; margin-bottom: 8px;")
+        layout.addWidget(hints)
+
         field_group = QGroupBox("匹配字段选择")
         fg_layout = QVBoxLayout(field_group)
         self.field_list = QListWidget()
@@ -56,15 +60,30 @@ class MatchingPage(QWidget):
         folder_layout.addStretch()
         layout.addLayout(folder_layout)
 
-        self.result_table = QTableWidget(0, 4)
-        self.result_table.setHorizontalHeaderLabels(["行号", "生成文件名", "匹配状态", "文件路径"])
-        self.result_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        select_row = QHBoxLayout()
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.clicked.connect(lambda: self._toggle_all(True))
+        self.select_none_btn = QPushButton("反选")
+        self.select_none_btn.clicked.connect(lambda: self._toggle_all(None))
+        select_row.addWidget(QLabel("选择要处理的行:"))
+        select_row.addWidget(self.select_all_btn)
+        select_row.addWidget(self.select_none_btn)
+        select_row.addStretch()
+        layout.addLayout(select_row)
+
+        self.result_table = QTableWidget(0, 5)
+        self.result_table.setHorizontalHeaderLabels(["", "行号", "生成文件名", "匹配状态", "文件路径"])
+        self.result_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.result_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.result_table.setColumnWidth(0, 30)
         layout.addWidget(self.result_table)
+
+        self.selected_indices: set = set()
 
     def initializePage(self):
         self.field_list.clear()
         for f in self.project.fields:
-            if not f.is_context:
+            if f.selected and not f.is_context:
                 item = QListWidgetItem(f.name)
                 item.setData(Qt.UserRole, f.name)
                 self.field_list.addItem(item)
@@ -73,6 +92,8 @@ class MatchingPage(QWidget):
             self.pattern_input.setText(self.project.match_rule.pattern)
         if self.project.match_rule.pdf_folder:
             self.folder_label.setText(self.project.match_rule.pdf_folder)
+
+        self.selected_indices = set(self.project.selected_rows)
 
     def _select_folder(self):
         path = QFileDialog.getExistingDirectory(self, "选择 PDF 文件夹")
@@ -104,27 +125,43 @@ class MatchingPage(QWidget):
 
         reader = ExcelReader(self.project.excel_path)
         matcher = FilenameMatcher(self.project.match_rule)
-        self.project.match_results = matcher.match(reader.get_data())
-        self._match_results = self.project.match_results
+        self._match_results = matcher.match(reader.get_data())
+        self.project.match_results = self._match_results
         self._show_results()
 
     def _show_results(self):
         self.result_table.setRowCount(len(self._match_results))
         for i, r in enumerate(self._match_results):
-            self.result_table.setItem(i, 0, QTableWidgetItem(str(r["row_index"])))
-            self.result_table.setItem(i, 1, QTableWidgetItem(r["generated"]))
-            status = "✅ 已匹配" if r["matched"] else "❌ 未匹配"
-            self.result_table.setItem(i, 2, QTableWidgetItem(status))
-            self.result_table.setItem(i, 3, QTableWidgetItem(r["file_path"]))
+            cb = QTableWidgetItem()
+            cb.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cb.setCheckState(Qt.Checked if i in self.selected_indices else Qt.Unchecked)
+            self.result_table.setItem(i, 0, cb)
 
-    def validate(self) -> bool:
-        if not self.pattern_input.text():
-            QMessageBox.warning(self, "提示", "请填写文件名模板")
-            return False
-        if not self.project.match_results:
-            QMessageBox.warning(self, "提示", "请先执行预览匹配")
-            return False
-        return True
+            self.result_table.setItem(i, 1, QTableWidgetItem(str(r["row_index"])))
+            self.result_table.setItem(i, 2, QTableWidgetItem(r["generated"]))
+            status = "✅ 已匹配" if r["matched"] else "❌ 未匹配"
+            self.result_table.setItem(i, 3, QTableWidgetItem(status))
+            self.result_table.setItem(i, 4, QTableWidgetItem(r["file_path"]))
+
+    def _toggle_all(self, state: bool | None):
+        for i in range(self.result_table.rowCount()):
+            if state is None:
+                cur = self.result_table.item(i, 0).checkState()
+                new = Qt.Unchecked if cur == Qt.Checked else Qt.Checked
+            else:
+                new = Qt.Checked if state else Qt.Unchecked
+            self.result_table.item(i, 0).setCheckState(new)
+
+    def collect_selected(self) -> list[int]:
+        rows = []
+        for i in range(self.result_table.rowCount()):
+            if self.result_table.item(i, 0) and self.result_table.item(i, 0).checkState() == Qt.Checked:
+                try:
+                    rows.append(int(self.result_table.item(i, 1).text()))
+                except (ValueError, AttributeError):
+                    pass
+        self.project.selected_rows = rows
+        return rows
 
     @property
     def match_results(self):

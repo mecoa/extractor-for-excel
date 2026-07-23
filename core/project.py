@@ -16,6 +16,7 @@ class Project:
         self.mineru_token: str = ""
         self.mineru_precision: bool = False
         self.match_results: list = []
+        self.selected_rows: list[int] = []
 
     def save(self):
         data = {

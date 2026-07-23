@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFileDialog,
-    QMessageBox, QFrame, QSizePolicy,
+    QMessageBox, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QColor, QFont, QPen
@@ -18,14 +18,29 @@ STEP_LABELS = ["Excel 配置", "文件匹配", "导入 OCR", "提取导出"]
 
 
 class StepIndicator(QWidget):
+    clicked = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current = 0
         self.setFixedHeight(80)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
 
     def set_step(self, step: int):
         self._current = step
         self.update()
+
+    def mousePressEvent(self, event):
+        w = self.width()
+        n = len(STEP_LABELS)
+        spacing = w // (n + 1)
+        circle_r = 18
+        for i in range(n):
+            cx = spacing * (i + 1)
+            if abs(event.position().x() - cx) < circle_r:
+                self.clicked.emit(i)
+                return
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -39,14 +54,12 @@ class StepIndicator(QWidget):
         for i, label in enumerate(STEP_LABELS):
             cx = spacing * (i + 1)
 
-            # connector line
             if i > 0:
                 prev_x = spacing * i
                 color = QColor("#4A90D9") if i <= self._current else QColor("#D0D0D0")
                 p.setPen(QPen(color, 3))
                 p.drawLine(prev_x + circle_r, 40, cx - circle_r, 40)
 
-            # circle
             if i < self._current:
                 color = QColor("#4A90D9")
                 p.setBrush(color)
@@ -68,10 +81,9 @@ class StepIndicator(QWidget):
                 p.setPen(QColor("#B0B0B0"))
                 p.drawText(cx - 5, 40 + 5, str(i + 1))
 
-            # label
-            p.setPen(QColor("#333333") if i <= self._current else QColor("#999999"))
             label_font = QFont("Segoe UI", 10)
             p.setFont(label_font)
+            p.setPen(QColor("#333333") if i <= self._current else QColor("#999999"))
             p.drawText(cx - 50, 70, 100, 20, Qt.AlignCenter, label)
 
         p.end()
@@ -108,6 +120,7 @@ class MainWindow(QMainWindow):
 
         self.step_indicator = StepIndicator()
         self.step_indicator.setStyleSheet("background: #FAFAFA; border-bottom: 1px solid #E0E0E0;")
+        self.step_indicator.clicked.connect(self._switch_to)
         root.addWidget(self.step_indicator)
 
         self.stack = QStackedWidget()
@@ -129,10 +142,13 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(16, 8, 16, 8)
 
         self.back_btn = QPushButton("← 上一步")
-        self.back_btn.setObjectName("nav_back")
+        self.back_btn.setStyleSheet(
+            "padding: 8px 24px; border: 1px solid #CCCCCC; border-radius: 6px;"
+            "background: white; color: #333; font-size: 13px; min-width: 100px;"
+        )
         self.back_btn.clicked.connect(self._go_back)
+
         self.next_btn = QPushButton("下一步 →")
-        self.next_btn.setObjectName("nav_next")
         self.next_btn.clicked.connect(self._go_next)
 
         nav_layout.addWidget(self.back_btn)
@@ -146,20 +162,7 @@ class MainWindow(QMainWindow):
     def _apply_style(self):
         self.setStyleSheet("""
             QMainWindow { background: #F5F5F5; }
-            QPushButton#nav_back {
-                padding: 8px 24px; border: 1px solid #CCCCCC;
-                border-radius: 6px; background: white; color: #333;
-                font-size: 13px; min-width: 100px;
-            }
-            QPushButton#nav_back:hover { background: #F0F0F0; }
-            QPushButton#nav_next {
-                padding: 8px 24px; border: none;
-                border-radius: 6px; background: #4A90D9; color: white;
-                font-size: 13px; font-weight: bold; min-width: 100px;
-            }
-            QPushButton#nav_next:hover { background: #357ABD; }
-            QPushButton#nav_next:disabled { background: #B0C4DE; }
-            QPushButton { font-size: 13px; }
+            QPushButton { font-size: 13px; border-radius: 4px; padding: 6px 16px; }
             QLabel { font-size: 13px; }
             QTableWidget {
                 border: 1px solid #E0E0E0; border-radius: 4px;
@@ -176,7 +179,6 @@ class MainWindow(QMainWindow):
                 padding: 6px 10px; font-size: 13px;
             }
             QLineEdit:focus { border-color: #4A90D9; }
-            QPushButton { border-radius: 4px; padding: 6px 16px; }
             QGroupBox {
                 font-weight: bold; border: 1px solid #E0E0E0;
                 border-radius: 6px; margin-top: 12px; padding-top: 16px;
@@ -196,44 +198,32 @@ class MainWindow(QMainWindow):
             self.next_btn.setText("下一步 →")
         self.step_indicator.set_step(idx)
 
+    def _switch_to(self, index: int):
+        current = self.stack.currentIndex()
+        if current == 0 and self.project.excel_path:
+            self.project.fields = self.pages[0].collect_fields()
+
+        self.stack.setCurrentIndex(index)
+        page = self.pages[index]
+        if hasattr(page, 'initializePage'):
+            page.initializePage()
+        self._update_nav()
+
     def _go_back(self):
-        idx = self.stack.currentIndex()
-        if idx > 0:
-            self.stack.setCurrentIndex(idx - 1)
-            self._update_nav()
+        self._switch_to(self.stack.currentIndex() - 1)
 
     def _go_next(self):
         idx = self.stack.currentIndex()
-
-        if idx == 0:
-            if not self.project.excel_path:
-                QMessageBox.warning(self, "提示", "请先打开一个 Excel 文件")
-                return
-            self.project.fields = self.pages[0].collect_fields()
-        elif idx == 1:
-            if not self.project.match_results:
-                QMessageBox.warning(self, "提示", "请先在「文件匹配」页面执行预览匹配")
-                return
-            if not self.project.match_rule.pattern:
-                QMessageBox.warning(self, "提示", "请填写文件名模板")
-                return
-
         if idx == len(self.pages) - 1:
             self._save_project()
             return
-
-        self.stack.setCurrentIndex(idx + 1)
-        next_page = self.pages[idx + 1]
-        if hasattr(next_page, 'initializePage'):
-            next_page.initializePage()
-        self._update_nav()
+        self._switch_to(idx + 1)
 
     def _new_project(self):
         self.project = Project()
         for p in self.pages:
             p.project = self.project
-        self.stack.setCurrentIndex(0)
-        self._update_nav()
+        self._switch_to(0)
         self.setWindowTitle("Extractor for Excel - 新建项目")
 
     def _open_project(self):
@@ -244,8 +234,7 @@ class MainWindow(QMainWindow):
             self.project = Project.from_path(path)
             for p in self.pages:
                 p.project = self.project
-            self.stack.setCurrentIndex(0)
-            self._update_nav()
+            self._switch_to(0)
             self.setWindowTitle(f"Extractor for Excel - {os.path.basename(path)}")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开项目失败:\n{e}")

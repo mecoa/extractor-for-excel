@@ -55,6 +55,10 @@ async function refreshState() {
   if (s.match_rule.pattern) document.getElementById("pattern").value = s.match_rule.pattern;
   document.getElementById("mineru-token").value = s.mineru_token || "";
   document.getElementById("mineru-precision").checked = s.mineru_precision;
+  document.getElementById("ocr-provider").value = s.ocr_provider || "mineru";
+  document.getElementById("baidu-api-key").value = s.baidu_api_key || "";
+  document.getElementById("baidu-secret-key").value = s.baidu_secret_key || "";
+  onProviderChange();
   const llm = s.llm_config || {};
   document.getElementById("llm-url").value = llm.base_url || "http://localhost:11434/v1";
   document.getElementById("llm-key").value = llm.api_key || "";
@@ -186,12 +190,21 @@ async function saveSelected() {
 }
 
 // ---- step 3 ----
+function onProviderChange() {
+  const provider = document.getElementById("ocr-provider").value;
+  document.getElementById("mineru-config").hidden = provider !== "mineru";
+  document.getElementById("baidu-config").hidden = provider !== "baidu";
+}
+
 async function saveMineru() {
   await api("/api/mineru/config", { method: "POST", body: JSON.stringify({
+    provider: document.getElementById("ocr-provider").value,
     token: document.getElementById("mineru-token").value,
     precision: document.getElementById("mineru-precision").checked,
+    baidu_api_key: document.getElementById("baidu-api-key").value,
+    baidu_secret_key: document.getElementById("baidu-secret-key").value,
   })});
-  toast("MinerU 设置已保存");
+  toast("OCR 设置已保存");
 }
 
 async function refreshOcrTable() {

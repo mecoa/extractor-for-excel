@@ -35,8 +35,11 @@ def create_app(service: ProjectService | None = None) -> FastAPI:
         rows: list[int]
 
     class MineruBody(BaseModel):
+        provider: str = "mineru"
         token: str = ""
         precision: bool = False
+        baidu_api_key: str = ""
+        baidu_secret_key: str = ""
 
     class LlmBody(BaseModel):
         base_url: str
@@ -127,7 +130,13 @@ def create_app(service: ProjectService | None = None) -> FastAPI:
     # ---- step 3 ----
     @app.post("/api/mineru/config")
     def set_mineru(body: MineruBody):
-        svc.set_mineru(body.token, body.precision)
+        svc.set_ocr_config(
+            provider=body.provider,
+            token=body.token,
+            precision=body.precision,
+            baidu_api_key=body.baidu_api_key,
+            baidu_secret_key=body.baidu_secret_key,
+        )
         return {"ok": True}
 
     @app.get("/api/ocr/table")

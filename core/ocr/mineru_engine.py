@@ -166,7 +166,18 @@ class MineruPrecisionEngine(OcrEngine):
         return ""
 
 
-def create_engine(token: str = "", use_precision: bool = False) -> OcrEngine:
+def create_engine(
+    token: str = "",
+    use_precision: bool = False,
+    provider: str = "mineru",
+    baidu_api_key: str = "",
+    baidu_secret_key: str = "",
+) -> OcrEngine:
+    if provider == "baidu":
+        if not baidu_api_key or not baidu_secret_key:
+            raise ValueError("baidu API Key and Secret Key required")
+        from .baidu_engine import BaiduDocParseEngine
+        return BaiduDocParseEngine(api_key=baidu_api_key, secret_key=baidu_secret_key)
     if use_precision:
         if not token:
             raise ValueError("token required for precision mode")

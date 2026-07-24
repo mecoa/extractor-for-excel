@@ -80,6 +80,9 @@ class ProjectService:
             "match_results": p.match_results,
             "mineru_token": p.mineru_token,
             "mineru_precision": p.mineru_precision,
+            "ocr_provider": p.ocr_provider,
+            "baidu_api_key": p.baidu_api_key,
+            "baidu_secret_key": p.baidu_secret_key,
             "llm_config": p.llm_config,
             "has_results": bool(self.results),
         }
@@ -152,6 +155,20 @@ class ProjectService:
         self.project.mineru_token = token
         self.project.mineru_precision = precision
 
+    def set_ocr_config(
+        self,
+        provider: str = "mineru",
+        token: str = "",
+        precision: bool = False,
+        baidu_api_key: str = "",
+        baidu_secret_key: str = "",
+    ):
+        self.project.ocr_provider = provider
+        self.project.mineru_token = token
+        self.project.mineru_precision = precision
+        self.project.baidu_api_key = baidu_api_key
+        self.project.baidu_secret_key = baidu_secret_key
+
     def _selected_files(self) -> list[tuple[int, str]]:
         matched = [r for r in self.project.match_results if r["matched"]]
         selected = set(self.project.selected_rows) if self.project.selected_rows else {
@@ -211,6 +228,9 @@ class ProjectService:
         engine = create_engine(
             token=self.project.mineru_token,
             use_precision=self.project.mineru_precision,
+            provider=self.project.ocr_provider,
+            baidu_api_key=self.project.baidu_api_key,
+            baidu_secret_key=self.project.baidu_secret_key,
         )
         job = Job("ocr")
         job.total = len(files)

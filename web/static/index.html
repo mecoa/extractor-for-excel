@@ -62,10 +62,24 @@
     <!-- Step 3 -->
     <section class="step" data-step="2" hidden>
       <h2>导入 & OCR</h2>
-      <p class="hint">配置 MinerU 后批量 OCR。空 Token = Agent 模式(免费,≤20页)。</p>
+      <p class="hint">选择 OCR 服务并配置。MinerU 空 Token = Agent 模式(免费,≤20页)；百度云需 API Key/Secret Key。</p>
       <div class="row">
+        <label>OCR 服务
+          <select id="ocr-provider" onchange="onProviderChange()">
+            <option value="mineru">MinerU</option>
+            <option value="baidu">百度云文档解析</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" id="mineru-config">
         <input id="mineru-token" placeholder="MinerU Token (留空用免费模式)" style="flex:1" />
         <label><input type="checkbox" id="mineru-precision" /> 精准模式</label>
+      </div>
+      <div class="row" id="baidu-config" hidden>
+        <input id="baidu-api-key" placeholder="百度云 API Key" style="flex:1" />
+        <input id="baidu-secret-key" placeholder="百度云 Secret Key" style="flex:1" />
+      </div>
+      <div class="row">
         <button onclick="saveMineru()">保存设置</button>
       </div>
       <div class="row">

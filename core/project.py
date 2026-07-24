@@ -13,8 +13,11 @@ class Project:
         self.match_rule: MatchRule = MatchRule()
         self.context_fields: List[str] = []
         self.llm_config: dict = {}
+        self.ocr_provider: str = "mineru"
         self.mineru_token: str = ""
         self.mineru_precision: bool = False
+        self.baidu_api_key: str = ""
+        self.baidu_secret_key: str = ""
         self.match_results: list = []
         self.selected_rows: list[int] = []
 
@@ -26,8 +29,11 @@ class Project:
             "match_rule": self.match_rule.to_dict() if self.match_rule else {},
             "context_fields": self.context_fields,
             "llm_config": self.llm_config,
+            "ocr_provider": self.ocr_provider,
             "mineru_token": self.mineru_token,
             "mineru_precision": self.mineru_precision,
+            "baidu_api_key": self.baidu_api_key,
+            "baidu_secret_key": self.baidu_secret_key,
         }
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -42,8 +48,11 @@ class Project:
         self.match_rule = MatchRule.from_dict(data.get("match_rule", {}))
         self.context_fields = data.get("context_fields", [])
         self.llm_config = data.get("llm_config", {})
+        self.ocr_provider = data.get("ocr_provider", "mineru")
         self.mineru_token = data.get("mineru_token", "")
         self.mineru_precision = data.get("mineru_precision", False)
+        self.baidu_api_key = data.get("baidu_api_key", "")
+        self.baidu_secret_key = data.get("baidu_secret_key", "")
 
     @classmethod
     def from_path(cls, path: str) -> "Project":

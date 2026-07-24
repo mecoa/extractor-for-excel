@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extractor for Excel</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">Extractor for Excel</div>
+    <div class="project-actions">
+      <input id="project-path" placeholder="项目 .json 路径" />
+      <button onclick="openProject()">打开</button>
+      <button onclick="saveProject()">保存</button>
+      <button onclick="newProject()">新建</button>
+    </div>
+  </header>
+
+  <nav id="stepper"></nav>
+
+  <main>
+    <!-- Step 1 -->
+    <section class="step" data-step="0">
+      <h2>Excel 模板配置</h2>
+      <p class="hint">选择 Excel 文件后勾选字段、填写提取说明。「参考」= 把该行已有值注入 LLM 作为背景。</p>
+      <div class="row">
+        <input type="file" id="excel-file" accept=".xlsx,.xls" onchange="uploadExcel()" />
+        <span id="excel-name" class="filename">未选择文件</span>
+      </div>
+      <table id="fields-table">
+        <thead><tr><th>使用</th><th>字段名</th><th>提取说明</th><th>示例值(、分隔)</th><th>参考</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="primary" onclick="saveFields()">保存字段配置</button>
+    </section>
+
+    <!-- Step 2 -->
+    <section class="step" data-step="1" hidden>
+      <h2>文件名匹配</h2>
+      <p class="hint">选择匹配字段、编写广播模板(如 {年}-{月}-{号}#)、选择 PDF 文件夹。</p>
+      <div class="row"><label>匹配字段:</label><div id="match-fields" class="chips"></div></div>
+      <div class="row">
+        <input id="pattern" placeholder="{年}-{月}-{号}#" style="flex:1" />
+        <label class="file-btn">选择 PDF 文件夹
+          <input type="file" id="pdf-files" webkitdirectory directory multiple onchange="uploadPdfs()" hidden />
+        </label>
+        <span id="pdf-name" class="filename">未选择文件夹</span>
+        <button onclick="previewMatch()">预览匹配</button>
+      </div>
+      <div class="row">
+        <button onclick="toggleAll('match-table', true)">全选</button>
+        <button onclick="toggleAll('match-table', false)">全不选</button>
+        <button class="primary" onclick="saveSelected()">保存选择</button>
+      </div>
+      <table id="match-table">
+        <thead><tr><th>选</th><th>行号</th><th>生成文件名</th><th>状态</th><th>文件路径</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Step 3 -->
+    <section class="step" data-step="2" hidden>
+      <h2>导入 & OCR</h2>
+      <p class="hint">配置 MinerU 后批量 OCR。空 Token = Agent 模式(免费,≤20页)。</p>
+      <div class="row">
+        <input id="mineru-token" placeholder="MinerU Token (留空用免费模式)" style="flex:1" />
+        <label><input type="checkbox" id="mineru-precision" /> 精准模式</label>
+        <button onclick="saveMineru()">保存设置</button>
+      </div>
+      <div class="row">
+        <button class="primary" onclick="startOcr()">开始 OCR</button>
+        <span id="ocr-progress" class="progress"></span>
+      </div>
+      <table id="ocr-table">
+        <thead><tr><th>选</th><th>行号</th><th>文件名</th><th>状态</th><th>页数</th><th>错误</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <h4>OCR 预览</h4>
+      <pre id="ocr-preview" class="preview"></pre>
+    </section>
+
+    <!-- Step 4 -->
+    <section class="step" data-step="3" hidden>
+      <h2>LLM 提取 & 导出</h2>
+      <p class="hint">配置 LLM(本地 Ollama 可不填 Key),提取后按置信度着色,可修正后导出。</p>
+      <div class="row">
+        <input id="llm-url" placeholder="http://localhost:11434/v1" style="flex:1" />
+        <input id="llm-key" placeholder="API Key (可空)" />
+        <input id="llm-model" placeholder="qwen2.5:7b" />
+        <button onclick="saveLlm()">保存</button>
+      </div>
+      <div class="row">
+        <button class="primary" onclick="startExtract()">开始提取</button>
+        <span id="extract-progress" class="progress"></span>
+        <button onclick="exportExcel()">导出 Excel</button>
+      </div>
+      <div class="split">
+        <table id="extract-table">
+          <thead><tr><th>行号</th><th>文件名</th><th>状态</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="detail">
+          <h4>提取详情</h4>
+          <table id="detail-table">
+            <thead><tr><th>字段</th><th>值</th><th>置信度</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

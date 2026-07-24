@@ -16,10 +16,26 @@ Built with PySide6 (desktop GUI), using MinerU cloud API for document parsing an
 
 ## Architecture
 
+Two frontends share the same `core/` business logic:
+- **Desktop (PySide6)**: `main.py` → `app.py` → `ui/`
+- **WebUI (FastAPI)**: `web_main.py` → `web/server.py` → `web/service.py` (+ `web/static/`)
+
+The web layer is preferred for development/testing — it's headless-testable via pytest
+(`tests/test_api.py`) and avoids Qt/libEGL setup. `web/service.py` is a Qt-free wrapper
+around `Project` + `core/` that manages state and background jobs (OCR/extract) with
+progress polling via `/api/job/{id}`.
+
 ```
-main.py                     entry point
+main.py                     desktop entry point
 app.py                      QApplication setup
-ui/                         GUI layer
+web_main.py                 web entry point (uvicorn)
+web/
+  server.py                 FastAPI routes (/api/*), serves static/
+  service.py                ProjectService — headless core wrapper + job runner
+  static/                   single-page frontend (index.html, app.js, style.css)
+tests/
+  test_api.py               pytest API tests (TestClient)
+ui/                         desktop GUI layer
   main_window.py            Stepper layout, step indicator, navigation
   step1_template.py         Excel load → field selector + annotations
   step2_matching.py         Filename pattern + broadcast matching
@@ -90,6 +106,11 @@ All Python deps are in `pyproject.toml`. Run `uv sync` once.
 
 ```bash
 uv sync           # first time only
+
+# WebUI (preferred for dev/testing)
+uv run python web_main.py     # → http://127.0.0.1:8000
+
+# Desktop
 uv run python main.py
 # or:
 ./run.sh          # auto-detects and fixes libEGL
@@ -104,7 +125,17 @@ uv run python main.py
 
 ## Testing
 
-There are no formal test files yet. Run manual integration tests:
+WebUI API tests (preferred — headless, no Qt):
+
+```bash
+uv run pytest              # runs tests/test_api.py via FastAPI TestClient
+```
+
+`tests/test_api.py` covers steps 1-2 end-to-end (Excel load, field config, filename
+matching, project save/open) plus error paths for OCR/extract/export. Network-dependent
+steps (MinerU OCR, LLM extract) are validated only for their guard conditions.
+
+Manual core checks:
 
 ```bash
 uv run python -c "

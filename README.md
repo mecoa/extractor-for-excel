@@ -2,7 +2,7 @@
 
 AI 驱动的文档 → Excel 数据提取工具。
 
-从 PDF / 图片中提取结构化数据，写入 Excel 模板。适用于审计、财务、合同管理等场景。
+从 PDF / 图片中提取结构化数据，写入 Excel 模板。适用于审计、财务、合同管理等场景。基于 Web 界面，浏览器即可使用。
 
 ## 工作流程
 
@@ -10,8 +10,8 @@ AI 驱动的文档 → Excel 数据提取工具。
 Excel 模板 → 文件名匹配 → MinerU OCR → LLM 提取 → Excel 输出
 ```
 
-1. **Excel 模板配置**：加载 Excel，勾选要提取的字段，填写字段说明和示例值
-2. **文件名匹配**：用广播语法（`{年}-{月}-{号}#`）自动匹配 PDF 文件到 Excel 行
+1. **Excel 模板配置**：上传 Excel，勾选要提取的字段，填写字段说明和示例值
+2. **文件名匹配**：上传 PDF 文件夹，用广播语法（`{年}-{月}-{号}#`）自动匹配 PDF 到 Excel 行
 3. **批量 OCR**：通过 MinerU 云端 API 解析文档，结果缓存到本地
 4. **LLM 提取**：AI 按字段说明提取数据，置信度着色展示，人工复核后导出
 
@@ -21,7 +21,6 @@ Excel 模板 → 文件名匹配 → MinerU OCR → LLM 提取 → Excel 输出
 
 - Python >= 3.11
 - [uv](https://github.com/astral-sh/uv)
-- Linux/WSL: `sudo apt-get install -y libegl1`
 
 ### 安装与运行
 
@@ -29,9 +28,10 @@ Excel 模板 → 文件名匹配 → MinerU OCR → LLM 提取 → Excel 输出
 git clone <repo-url>
 cd extractor-for-excel
 uv sync
-uv run python main.py
-# 或: ./run.sh
+uv run python web_main.py    # → http://127.0.0.1:8000
 ```
+
+浏览器打开 http://127.0.0.1:8000 即可使用。
 
 ### 配置
 
@@ -51,16 +51,16 @@ uv run python main.py
 ## 项目结构
 
 ```
-main.py                 入口
-app.py                  QApplication
-ui/                     PySide6 GUI
+web_main.py             入口（uvicorn）
+web/                    FastAPI 后端 + 单页前端（static/）
 core/                   业务逻辑（OCR、提取、Excel、匹配）
 models/                 数据模型
+tests/                  pytest API 测试
 ```
 
 ## 技术栈
 
-- **GUI**: PySide6
+- **UI**: FastAPI + 原生 JS 单页前端
 - **OCR**: MinerU 云 API
 - **LLM**: OpenAI 兼容接口
 - **Excel**: openpyxl + pandas

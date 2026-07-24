@@ -2,46 +2,36 @@
 
 ## Overview
 
-A Python desktop application that extracts structured data from PDF/images and writes it into Excel templates using a pipeline: **Excel template → filename matching → MinerU OCR → LLM extraction → Excel output**.
+A Python web application that extracts structured data from PDF/images and writes it into Excel templates using a pipeline: **Excel template → filename matching → MinerU OCR → LLM extraction → Excel output**.
 
-Built with PySide6 (desktop GUI), using MinerU cloud API for document parsing and OpenAI-compatible APIs (including local Ollama) for AI extraction.
+Built with FastAPI (web backend + single-page frontend), using MinerU cloud API for document parsing and OpenAI-compatible APIs (including local Ollama) for AI extraction.
 
 ## Tech Stack
 
-- **UI**: PySide6 (QStackedWidget custom stepper, no QWizard — avoid it, it deadlocks on `removePage`)
-- **Package management**: uv (`uv sync && uv run python main.py`)
+- **UI**: FastAPI + vanilla JS single-page frontend (custom stepper in `web/static/`)
+- **Package management**: uv (`uv sync && uv run python web_main.py`)
 - **Excel**: openpyxl (write) + pandas (read)
 - **HTTP**: httpx
 - **Storage**: SQLite for OCR cache
 
 ## Architecture
 
-Two frontends share the same `core/` business logic:
-- **Desktop (PySide6)**: `main.py` → `app.py` → `ui/`
+The web layer wraps the same `core/` business logic:
 - **WebUI (FastAPI)**: `web_main.py` → `web/server.py` → `web/service.py` (+ `web/static/`)
 
-The web layer is preferred for development/testing — it's headless-testable via pytest
-(`tests/test_api.py`) and avoids Qt/libEGL setup. `web/service.py` is a Qt-free wrapper
-around `Project` + `core/` that manages state and background jobs (OCR/extract) with
-progress polling via `/api/job/{id}`.
+`web/service.py` is a `ProjectService` wrapper around `Project` + `core/` that manages
+state and background jobs (OCR/extract) with progress polling via `/api/job/{id}`.
+It's fully headless-testable via pytest (`tests/test_api.py`). Uploaded Excel/PDF files
+land in a per-session temp workdir, so no local path typing is required.
 
 ```
-main.py                     desktop entry point
-app.py                      QApplication setup
 web_main.py                 web entry point (uvicorn)
 web/
-  server.py                 FastAPI routes (/api/*), serves static/
-  service.py                ProjectService — headless core wrapper + job runner
+  server.py                 FastAPI routes (/api/*), upload endpoints, serves static/
+  service.py                ProjectService — core wrapper + job runner + upload handling
   static/                   single-page frontend (index.html, app.js, style.css)
 tests/
   test_api.py               pytest API tests (TestClient)
-ui/                         desktop GUI layer
-  main_window.py            Stepper layout, step indicator, navigation
-  step1_template.py         Excel load → field selector + annotations
-  step2_matching.py         Filename pattern + broadcast matching
-  step3_import.py           MinerU OCR import + cache
-  step4_review.py           LLM extraction + confidence review + export
-  widgets/conf_label.py     Colored confidence badge (high/medium/low/missing)
 core/                       business logic
   ocr/
     engine.py               OcrEngine abstract class
@@ -63,10 +53,6 @@ models/                     data models
 
 ## Key Design Decisions
 
-### Steering away from QWizard
-
-QWizard.removePage() freezes the app when called during page transitions. The app uses QStackedWidget + a custom `StepIndicator` widget instead. Steps are freely navigable — click any step dot to jump. No forced sequential order.
-
 ### Confidence pipeline
 
 ```
@@ -77,7 +63,7 @@ Four levels: `high` / `medium` / `low` / `missing`. LLM is instructed to output 
 
 ### SQLite threading
 
-Cache connections use `check_same_thread=False`. Worker threads in step3/step4 share the DB safely.
+Cache connections use `check_same_thread=False`. Background job threads (OCR/extract) in `web/service.py` share the DB safely.
 
 ### Prompt structure
 
@@ -98,8 +84,6 @@ This is then matched against actual PDF filenames in the selected folder.
 
 ## System Dependencies
 
-**Linux (Debian/Ubuntu/WSL):** `sudo apt-get install -y libegl1` (PySide6 needs EGL)
-
 All Python deps are in `pyproject.toml`. Run `uv sync` once.
 
 ## Running
@@ -107,21 +91,14 @@ All Python deps are in `pyproject.toml`. Run `uv sync` once.
 ```bash
 uv sync           # first time only
 
-# WebUI (preferred for dev/testing)
 uv run python web_main.py     # → http://127.0.0.1:8000
-
-# Desktop
-uv run python main.py
-# or:
-./run.sh          # auto-detects and fixes libEGL
 ```
 
 ## Common Issues
 
-- **"打不开" on WSL**: Missing `libegl1`. `sudo apt-get install -y libegl1`
 - **SQLite threading error**: Already fixed (`check_same_thread=False`). If reappears, ensure OcrCache connections aren't shared across threads.
 - **MinerU 404**: MinerU API endpoints changed. Agent API uses `/api/v1/agent/parse/file` (signature upload), Precision API uses `/api/v4/file-urls/batch` (batch upload).
-- **QWizard deadlock**: Don't use QWizard in this project. It's been replaced with QStackedWidget.
+- **Directory upload unsupported**: Step 2 uses `webkitdirectory` for folder upload — works in Chromium/Firefox desktop; older Safari may not support it.
 
 ## Testing
 

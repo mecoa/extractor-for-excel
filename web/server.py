@@ -1,4 +1,5 @@
 import os
+import sys
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
@@ -8,7 +9,17 @@ from pydantic import BaseModel
 from web.service import ProjectService
 
 
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+def _static_dir() -> str:
+    # PyInstaller 解包目录（onefile 模式解压到 sys._MEIPASS）
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        bundled = os.path.join(base, "web", "static")
+        if os.path.isdir(bundled):
+            return bundled
+    return os.path.join(os.path.dirname(__file__), "static")
+
+
+STATIC_DIR = _static_dir()
 
 
 def create_app(service: ProjectService | None = None) -> FastAPI:

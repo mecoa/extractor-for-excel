@@ -85,16 +85,20 @@ wheels = [
 
 [[package]]
 name = "extractor-for-excel"
-version = "0.1.0"
-source = { virtual = "." }
+version = "0.2.0"
+source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "openpyxl" },
     { name = "pandas" },
-    { name = "pytest" },
     { name = "python-multipart" },
     { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -103,10 +107,12 @@ requires-dist = [
     { name = "httpx" },
     { name = "openpyxl" },
     { name = "pandas" },
-    { name = "pytest", specifier = ">=9.1.1" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "fastapi"

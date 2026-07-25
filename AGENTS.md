@@ -112,6 +112,23 @@ uv run pytest              # runs tests/test_api.py via FastAPI TestClient
 matching, project save/open) plus error paths for OCR/extract/export. Network-dependent
 steps (MinerU OCR, LLM extract) are validated only for their guard conditions.
 
+### E2E UI 测试 (playwright-cli，真实 API)
+
+完整浏览器流程（步骤 1-4，含真实 MinerU OCR + LLM 提取）:
+
+```bash
+# 生成夹具（xlsx 模板 + 匹配 PDF，产物在 tests/fixtures/generated/，已 gitignore）
+uv run python tests/fixtures/generate_fixtures.py
+
+# 跑完整 E2E（密钥通过环境变量传入，切勿硬编码）
+MINERU_TOKEN=sk-xxx DEEPSEEK_KEY=sk-yyy bash tests/e2e_ui.sh
+```
+
+- 需先安装浏览器: `playwright-cli install-browser chrome-for-testing`
+- 需系统库: `libnspr4 libnss3`（`sudo apt-get install -y libnspr4 libnss3`）
+- 可覆盖变量: `DEEPSEEK_URL`、`DEEPSEEK_MODEL`（默认 `deepseek-v4-flash`）、`PW_BROWSER`（默认 chromium）
+- 夹具生成器 `tests/fixtures/generate_fixtures.py` 无第三方 PDF 依赖，手写合法单页 PDF
+
 Manual core checks:
 
 ```bash

@@ -94,11 +94,14 @@ class ProjectService:
         reader = ExcelReader(path)
         self.project.excel_path = path
         headers = reader.headers
-        if not self.project.fields:
-            self.project.fields = [
-                FieldDef(name=h, annotation="", examples=[], is_context=False, selected=True)
-                for h in headers
-            ]
+        self.project.fields = [
+            FieldDef(name=h, annotation="", examples=[], is_context=False, selected=True)
+            for h in headers
+        ]
+        self.project.match_results = []
+        self.project.selected_rows = []
+        self.results = {}
+        self.jobs = {}
         return headers
 
     def save_excel_upload(self, filename: str, content: bytes) -> list[str]:

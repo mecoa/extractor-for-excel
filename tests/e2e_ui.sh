@@ -92,6 +92,9 @@ sleep 2
 FIELDS=$(pweval "JSON.stringify([...document.querySelectorAll('#fields-table .f-name')].map(e=>e.textContent))")
 echo "  已加载字段: $FIELDS"
 echo "$FIELDS" | grep -q "年" || { echo "  Excel 加载失败"; exit 1; }
+# 取消勾选已有数据的列，只保留需要 AI 提取的列
+pweval "document.querySelectorAll('#fields-table tbody tr').forEach(tr => { if (['年','月','号'].includes(tr.querySelector('.f-name').textContent)) { const cb = tr.querySelector('.f-sel'); if (cb.checked) cb.click(); } })" >/dev/null
+sleep 1
 pw click "getByRole('button', { name: '保存字段配置' })" >/dev/null
 sleep 2
 

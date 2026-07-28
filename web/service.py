@@ -115,7 +115,7 @@ class ProjectService:
 
     # ---- step 2: matching ----
     def match_field_candidates(self) -> list[str]:
-        return [f.name for f in self.project.fields if f.selected and not f.is_context]
+        return [f.name for f in self.project.fields]
 
     def save_pdf_uploads(self, files: list[tuple[str, bytes]]) -> str:
         folder = self._upload_dir("pdfs")
@@ -403,7 +403,7 @@ class ProjectService:
             results_list.append(ExtractResult(row_index=row_idx, file_path="", fields=frs))
 
         writer = ExcelWriter(self.project.excel_path, output_path)
-        writer.write_results(results_list, field_names, start_col=len(field_names) + 1)
+        writer.write_results(results_list, field_names)
         return output_path
 
     def job_status(self, job_id: str) -> dict:

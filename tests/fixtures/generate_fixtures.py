@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import argparse
 import os
-import zlib
 
+from fpdf import FPDF
 from openpyxl import Workbook
 
 
@@ -29,6 +29,20 @@ ROWS = [
 ]
 
 HEADERS = ["年", "月", "号", "开票单位", "金额"]
+
+_CJK_FONT_CANDIDATES = [
+    os.path.expanduser("~/.fonts/NotoSansSC-VF.ttf"),
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]
+
+
+def _find_cjk_font() -> str | None:
+    for p in _CJK_FONT_CANDIDATES:
+        if os.path.isfile(p):
+            return p
+    return None
 
 
 def make_excel(path: str) -> None:
@@ -42,62 +56,23 @@ def make_excel(path: str) -> None:
     wb.save(path)
 
 
-def _pdf_escape(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-
-
 def make_pdf(path: str, lines: list[str]) -> None:
-    """生成一个最小但合法的单页 PDF，含可被 OCR 读取的文本。
+    """生成一个可被 OCR 读取的 PDF，使用系统 CJK 字体渲染中文。"""
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=False, margin=0)
+    pdf.add_page()
 
-    使用 WinAnsi 标准字体，仅支持 ASCII 文本；中文以拼音/英文替代，
-    确保生成的 PDF 结构合法且文本层可提取。
-    """
-    content_lines = ["BT", "/F1 14 Tf", "72 760 Td", "16 TL"]
+    font_path = _find_cjk_font()
+    if font_path:
+        pdf.add_font("CJK", "", font_path)
+        pdf.set_font("CJK", size=14)
+    else:
+        pdf.set_font("Helvetica", size=14)
+
+    pdf.set_y(60)
     for line in lines:
-        content_lines.append(f"({_pdf_escape(line)}) Tj")
-        content_lines.append("T*")
-    content_lines.append("ET")
-    stream = "\n".join(content_lines).encode("latin-1", "replace")
-    compressed = zlib.compress(stream)
-
-    objects: list[bytes] = []
-    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-    objects.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-    objects.append(
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
-        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
-    )
-    objects.append(
-        b"<< /Length "
-        + str(len(compressed)).encode()
-        + b" /Filter /FlateDecode >>\nstream\n"
-        + compressed
-        + b"\nendstream"
-    )
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-
-    buf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-    offsets = [0]
-    for i, obj in enumerate(objects, start=1):
-        offsets.append(len(buf))
-        buf += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
-
-    xref_pos = len(buf)
-    n = len(objects) + 1
-    buf += f"xref\n0 {n}\n".encode()
-    buf += b"0000000000 65535 f \n"
-    for off in offsets[1:]:
-        buf += f"{off:010d} 00000 n \n".encode()
-    buf += (
-        b"trailer\n<< /Size "
-        + str(n).encode()
-        + b" /Root 1 0 R >>\nstartxref\n"
-        + str(xref_pos).encode()
-        + b"\n%%EOF"
-    )
-
-    with open(path, "wb") as f:
-        f.write(buf)
+        pdf.cell(0, 12, text=line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(path)
 
 
 def generate(out_dir: str) -> dict:

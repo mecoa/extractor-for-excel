@@ -1,6 +1,5 @@
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-from typing import Dict
 from models.extract_result import ExtractResult
 from models.field import Confidence
 
@@ -22,15 +21,22 @@ class ExcelWriter:
         self,
         results: list[ExtractResult],
         field_names: list[str],
-        start_col: int = 1,
     ):
         wb = load_workbook(self.template_path)
         ws = wb.active
+        headers = [str(cell.value or "") for cell in ws[1]]
+        col_indices = []
+        for fname in field_names:
+            try:
+                col_indices.append(headers.index(fname) + 1)
+            except ValueError:
+                col_indices.append(-1)
 
         for result in results:
-            row_num = result.row_index + 1 + 1
-            for i, fname in enumerate(field_names):
-                col = start_col + i
+            row_num = result.row_index + 2
+            for fname, col in zip(field_names, col_indices):
+                if col < 1:
+                    continue
                 fr = result.fields.get(fname)
                 if fr is None:
                     continue

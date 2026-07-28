@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build & Release
 
 on:
   push:
@@ -22,29 +22,20 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync dependencies
-        run: uv sync
-
-      - name: Install PyInstaller
-        run: uv pip install pyinstaller
+        run: uv sync --dev
 
       - name: Build exe
         run: uv run pyinstaller packaging/windows.spec
 
-      - name: Rename artifact with version
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          Copy-Item dist/ExtractorForExcel.exe "dist/ExtractorForExcel-$tag.exe"
-
-      - name: Upload build artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: dist/ExtractorForExcel-*.exe
+          name: ExtractorForExcel-windows
+          path: dist/ExtractorForExcel.exe
 
-      - name: Publish to Release
+      - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ExtractorForExcel-*.exe
+          files: dist/ExtractorForExcel.exe
           generate_release_notes: true

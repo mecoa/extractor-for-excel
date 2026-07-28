@@ -16,6 +16,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "fpdf2>=2.8.0",
+    "pyinstaller>=6.0.0",
 ]
 
 [project.scripts]

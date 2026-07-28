@@ -18,7 +18,7 @@ function toast(msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 2500);
+  setTimeout(() => t.classList.remove("show"), 3000);
 }
 
 // ---- stepper ----
@@ -49,35 +49,105 @@ function goStep(i) {
 // ---- project ----
 async function refreshState() {
   const s = await api("/api/state");
-  document.getElementById("project-path").value = s.path || "";
+  const pathSpan = document.getElementById("project-path");
+  pathSpan.textContent = s.path ? s.path : "（未保存）";
   if (s.excel_name) document.getElementById("excel-name").textContent = s.excel_name;
   if (s.fields.length) renderFields(s.fields);
   if (s.match_rule.pattern) document.getElementById("pattern").value = s.match_rule.pattern;
-  document.getElementById("mineru-token").value = s.mineru_token || "";
+  showKeyStatus("mineru-token", s.mineru_token_set);
   document.getElementById("mineru-precision").checked = s.mineru_precision;
   document.getElementById("ocr-provider").value = s.ocr_provider || "mineru";
-  document.getElementById("baidu-api-key").value = s.baidu_api_key || "";
-  document.getElementById("baidu-secret-key").value = s.baidu_secret_key || "";
+  showKeyStatus("baidu-api-key", s.baidu_api_key_set);
+  showKeyStatus("baidu-secret-key", s.baidu_secret_key_set);
   onProviderChange();
   const llm = s.llm_config || {};
   document.getElementById("llm-url").value = llm.base_url || "http://localhost:11434/v1";
-  document.getElementById("llm-key").value = llm.api_key || "";
+  document.getElementById("llm-key").placeholder = s.llm_key_set ? "已保存到密钥环" : "";
+  document.getElementById("llm-key").value = "";
   document.getElementById("llm-model").value = llm.model || "qwen2.5:7b";
 }
 
-async function newProject() {
-  await api("/api/project/new", { method: "POST" });
-  location.reload();
+function showKeyStatus(inputId, isSet) {
+  const el = document.getElementById(inputId);
+  if (isSet) {
+    el.placeholder = "已保存到密钥环";
+    el.value = "";
+  } else {
+    el.placeholder = "";
+    el.value = "";
+  }
 }
-async function openProject() {
-  const path = document.getElementById("project-path").value;
-  try { await api("/api/project/open", { method: "POST", body: JSON.stringify({ path }) }); toast("已打开"); await refreshState(); }
-  catch (e) { toast(e.message); }
+
+function newProject() {
+  document.getElementById("new-dir").click();
 }
+
+function openProject() {
+  document.getElementById("open-dir").click();
+}
+
+function _dirNameFromFiles(files) {
+  for (const f of files) {
+    const rel = f.webkitRelativePath || f.name;
+    const parts = rel.split("/");
+    if (parts.length > 1) return parts[0];
+  }
+  return "";
+}
+
+async function newProjectDir(event) {
+  const files = event.target.files;
+  event.target.value = "";
+  let name = _dirNameFromFiles(files);
+  if (!name) name = prompt("项目名称", "未命名项目");
+  if (!name) return;
+  try {
+    const s = await api("/api/project/new-as", { method: "POST", body: JSON.stringify({ path: name }) });
+    document.getElementById("project-path").textContent = s.path;
+    await refreshState();
+    toast("已创建新项目");
+  } catch (e) { toast(e.message); }
+}
+
+async function openProjectDir(event) {
+  const files = event.target.files;
+  event.target.value = "";
+  if (!files.length) return;
+  const fd = new FormData();
+  for (const f of files) {
+    const rel = f.webkitRelativePath || f.name;
+    const parts = rel.split("/");
+    const base = parts.slice(1).join("/");
+    if (base === "project.json" || base === "template.xlsx" || base === "cache.db") {
+      fd.append("files", f, rel);
+    }
+  }
+  if (!fd.has("project.json")) { toast("所选目录中没有 project.json"); return; }
+  try {
+    const res = await fetch("/api/project/open/upload", { method: "POST", body: fd });
+    const r = await res.json();
+    if (!res.ok || r.detail) throw new Error(r.detail || "打开失败");
+    toast("项目已打开");
+    await refreshState();
+  } catch (e) { toast(e.message); }
+}
+
 async function saveProject() {
-  const path = document.getElementById("project-path").value;
-  try { const r = await api("/api/project/save", { method: "POST", body: JSON.stringify({ path }) }); document.getElementById("project-path").value = r.path; toast("已保存"); }
-  catch (e) { toast(e.message); }
+  try {
+    const s = await api("/api/state");
+    if (!s.path) { newProject(); return; }
+    await api("/api/project/save", { method: "POST", body: JSON.stringify({ path: "" }) });
+    await refreshState();
+    toast("已保存");
+  } catch (e) { toast(e.message); }
+}
+
+async function saveProjectAs() {
+  try {
+    const r = await api("/api/project/save-as", { method: "POST", body: JSON.stringify({ path: "" }) });
+    await refreshState();
+    toast("已保存到 " + r.path);
+  } catch (e) { toast(e.message); }
 }
 
 // ---- step 1 ----
@@ -205,6 +275,7 @@ async function saveMineru() {
     baidu_secret_key: document.getElementById("baidu-secret-key").value,
   })});
   toast("OCR 设置已保存");
+  refreshState();
 }
 
 async function refreshOcrTable() {
@@ -242,6 +313,7 @@ async function saveLlm() {
     model: document.getElementById("llm-model").value,
   })});
   toast("LLM 设置已保存");
+  refreshState();
 }
 
 async function refreshExtractTable() {

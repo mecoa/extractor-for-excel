@@ -1,7 +1,9 @@
 import os
 import sys
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import json
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -87,6 +89,49 @@ def create_app(service: ProjectService | None = None) -> FastAPI:
         except Exception as e:
             return _err(e)
         return {"path": path}
+
+    @app.post("/api/project/save-as")
+    def save_project_as(body: PathBody):
+        try:
+            path = svc.save_project_as(body.path or "")
+        except Exception as e:
+            return _err(e)
+        return {"path": path}
+
+    @app.post("/api/project/new-as")
+    def new_project_as(body: PathBody):
+        name = (body.path or "").strip()
+        if not name:
+            name = "未命名项目"
+        svc.new_project()
+        try:
+            path = svc.save_project_as(name)
+        except Exception as e:
+            return _err(e)
+        return {"path": path}
+
+    @app.post("/api/project/open/upload")
+    async def open_project_upload(files: list[UploadFile] = File(...)):
+        try:
+            content = {}
+            dir_name = ""
+            for f in files:
+                data = await f.read()
+                key = f.filename or ""
+                parts = key.split("/")
+                if not dir_name and len(parts) > 1:
+                    dir_name = parts[0]
+                base = parts[-1]
+                if base == "project.json":
+                    content["project.json"] = json.loads(data.decode("utf-8"))
+                elif base == "cache.db":
+                    content["cache.db"] = data
+                elif base == "template.xlsx":
+                    content["template.xlsx"] = data
+            svc.open_project_upload(content, dir_name)
+        except Exception as e:
+            return _err(e)
+        return svc.state()
 
     # ---- step 1 ----
     @app.post("/api/excel/load")
@@ -208,6 +253,31 @@ def create_app(service: ProjectService | None = None) -> FastAPI:
             return svc.job_status(job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="job not found")
+
+    # ---- file browser ----
+    class FsListBody(BaseModel):
+        path: str = ""
+
+    @app.post("/api/fs/list")
+    def fs_list(body: FsListBody):
+        path = body.path or os.path.expanduser("~")
+        if not os.path.isdir(path):
+            return JSONResponse(status_code=400, content={"detail": "目录不存在"})
+        try:
+            entries = []
+            for name in sorted(os.listdir(path)):
+                if name.startswith("."):
+                    continue
+                full = os.path.join(path, name)
+                try:
+                    is_dir = os.path.isdir(full)
+                except OSError:
+                    is_dir = False
+                entries.append({"name": name, "path": full, "is_dir": is_dir})
+            parent = os.path.dirname(path) if path != "/" else ""
+            return {"entries": entries, "current": path, "parent": parent}
+        except PermissionError:
+            return JSONResponse(status_code=403, content={"detail": "权限不足"})
 
     if os.path.isdir(STATIC_DIR):
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

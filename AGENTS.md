@@ -12,7 +12,8 @@ Built with FastAPI (web backend + single-page frontend), using MinerU cloud API 
 - **Package management**: uv (`uv sync && uv run python web_main.py`)
 - **Excel**: openpyxl (write) + pandas (read)
 - **HTTP**: httpx
-- **Storage**: SQLite for OCR cache
+- **Storage**: SQLite (`cache.db`) for OCR results + extraction results
+- **Secrets**: OS keyring (via `keyring` library) with `project.keys.json` fallback (chmod 600)
 
 ## Architecture
 
@@ -45,6 +46,8 @@ core/                       business logic
     writer.py               openpyxl writer with confidence color fills
   matcher.py                Filename broadcast matching engine
   project.py                Project configuration (save/load .json)
+  storage.py                OcrCache + ResultCache (SQLite extract results persistence)
+  keyring_manager.py        KeyManager — OS keyring + project.keys.json fallback
 models/                     data models
   field.py                  FieldDef, Confidence, MatchRule
   ocr_cache.py              OcrCacheEntry, OcrStatus
@@ -61,9 +64,46 @@ OCR置信度 → embedding in LLM prompt → LLM输出置信度 → final = min(
 
 Four levels: `high` / `medium` / `low` / `missing`. LLM is instructed to output `missing` (not fabricate) for fields absent from the document.
 
+### Storage architecture
+
+项目目录在 `~/Documents/extractor-projects/{项目名}/`（跨平台，Windows/macOS/Linux 通用）：
+
+```
+~/Documents/extractor-projects/发票提取/
+├── project.json              ← 纯配置（相对路径，无 API Key）
+├── project.keys.json         ← (仅 keyring 不可用时) chmod 600
+├── cache.db                  ← SQLite: ocr_cache + extract_results 两张表
+├── template.xlsx             ← Excel 模板副本
+├── pdfs/                     ← PDF 文件（仅上传时存于此）
+└── output/                   ← 导出产物
+```
+
+- **项目操作**：新建/打开都用原生文件管理器（`webkitdirectory`），选目录即项目目录。
+- **新建**：`webkitdirectory` 选目录 → 取其名 → 创建到 `~/Documents/extractor-projects/{名}/`
+- **打开**：`webkitdirectory` 选目录 → 上传 `project.json`/`cache.db`/`template.xlsx` → 自动导入到 managed 目录
+- **PDF 不拷贝进项目目录**: 只保留绝对路径引用。重新打开时如果目录还在则直接复用 OCR 缓存（不重复 OCR）。
+- **密钥管理**: `core/keyring_manager.py` → `KeyManager`。优先 OS keyring（GNOME Keyring / macOS Keychain），降级到 `{project_dir}/project.keys.json`（chmod 600）。`project.json` 不写任何密钥字段。
+
 ### SQLite threading
 
 Cache connections use `check_same_thread=False`. Background job threads (OCR/extract) in `web/service.py` share the DB safely.
+
+### Extract result persistence
+
+`core/storage.py` 中的 `ResultCache` 将提取结果持久化到 `cache.db` 的 `extract_results` 表：
+```sql
+CREATE TABLE extract_results (
+    row_index INTEGER NOT NULL,
+    field_name TEXT NOT NULL,
+    value TEXT,
+    confidence TEXT NOT NULL DEFAULT 'missing',
+    llm_reasoning TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (row_index, field_name)
+);
+```
+
+提取结果在每次行处理完成后自动写入 SQLite，打开项目时自动加载，重启不丢。用户手动修正字段值也会同步写回。
 
 ### Prompt structure
 

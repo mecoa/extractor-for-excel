@@ -1,4 +1,6 @@
+import json
 import os
+import platform
 import shutil
 import tempfile
 import threading
@@ -9,13 +11,21 @@ from core.project import Project
 from core.excel.reader import ExcelReader
 from core.matcher import FilenameMatcher
 from core.ocr.mineru_engine import create_engine
-from core.ocr.cache import OcrCache
+from core.storage import OcrCache, ResultCache
+from core.keyring_manager import KeyManager
 from core.extract.llm_client import LlmClient
 from core.extract.prompt_builder import PromptBuilder
 from core.excel.writer import ExcelWriter
 from models.field import FieldDef, Confidence
 from models.ocr_cache import OcrCacheEntry, OcrStatus
 from models.extract_result import ExtractResult, FieldResult
+
+
+KEY_MINERU_TOKEN = "mineru_token"
+KEY_BAIDU_API_KEY = "baidu_api_key"
+KEY_BAIDU_SECRET_KEY = "baidu_secret_key"
+KEY_LLM_API_KEY = "llm_api_key"
+KEY_NAMES = {KEY_MINERU_TOKEN, KEY_BAIDU_API_KEY, KEY_BAIDU_SECRET_KEY, KEY_LLM_API_KEY}
 
 
 class Job:
@@ -37,25 +47,100 @@ class ProjectService:
         self.results: dict[int, dict] = {}
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
-        self.workdir = os.path.join(tempfile.gettempdir(), "extractor_web", uuid.uuid4().hex)
-        os.makedirs(self.workdir, exist_ok=True)
-        if not self.project.path:
-            self.project.path = os.path.join(self.workdir, "project.json")
+        self._km: Optional[KeyManager] = None
+
+        if self.project.project_dir:
+            self.workdir = self.project.project_dir
+            self._km = KeyManager(self.project.project_dir)
+            self._load_extract_results()
+        else:
+            self.workdir = os.path.join(tempfile.gettempdir(), "extractor_web", uuid.uuid4().hex)
+            os.makedirs(self.workdir, exist_ok=True)
+            if not self.project.path:
+                self.project.path = os.path.join(self.workdir, "project.json")
 
     def _upload_dir(self, name: str) -> str:
         d = os.path.join(self.workdir, name)
         os.makedirs(d, exist_ok=True)
         return d
 
+    # ---- key management ----
+    def _get_keyman(self) -> KeyManager:
+        if self._km is None:
+            self._km = KeyManager(self.project.project_dir)
+        return self._km
+
+    def _key_get(self, name: str) -> str:
+        val = self._get_keyman().get(name)
+        return val if val else ""
+
+    def _key_set(self, name: str, value: str):
+        if value:
+            self._get_keyman().set(name, value)
+        else:
+            self._get_keyman().delete(name)
+
+    def _key_set_bool(self, name: str) -> bool:
+        return bool(self._get_keyman().get(name))
+
+    # ---- result persistence ----
+    def _cache_db_path(self) -> str:
+        return self.project.cache_db_path()
+
+    def _init_cache_db(self):
+        path = self._cache_db_path()
+        if path:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = OcrCache(path)
+            conn.close()
+
+    def _load_extract_results(self):
+        path = self._cache_db_path()
+        if not path or not os.path.exists(path):
+            self.results = {}
+            return
+        rc = ResultCache(path)
+        try:
+            self.results = rc.load_all()
+        finally:
+            rc.close()
+
+    def _save_extract_results(self):
+        path = self._cache_db_path()
+        if not path:
+            return
+        self._init_cache_db()
+        rc = ResultCache(path)
+        try:
+            rc.save_all(self.results)
+        finally:
+            rc.close()
+
+    def _save_extract_field(self, row_index: int, field_name: str, value: str, confidence: str = "missing"):
+        path = self._cache_db_path()
+        if not path:
+            return
+        self._init_cache_db()
+        rc = ResultCache(path)
+        try:
+            rc.save_field(row_index, field_name, value, confidence)
+        finally:
+            rc.close()
+
     # ---- project lifecycle ----
     def new_project(self):
         self.project = Project()
         self.results = {}
         self.jobs = {}
+        self._km = None
 
     def open_project(self, path: str):
         self.project = Project.from_path(path)
         self.results = {}
+        self.jobs = {}
+        self._km = KeyManager(self.project.project_dir)
+        self.workdir = self.project.project_dir
+        self._load_extract_results()
 
     def save_project(self, path: str = "") -> str:
         if path:
@@ -66,6 +151,67 @@ class ProjectService:
             raise ValueError("no project path")
         self.project.save()
         return self.project.path
+
+    @staticmethod
+    def _projects_base() -> str:
+        docs = os.path.join(os.path.expanduser("~"), "Documents")
+        return os.path.join(docs, "extractor-projects")
+
+    def _default_project_dir(self) -> str:
+        base = self._projects_base()
+        name = self.project.excel_name or "未命名项目"
+        name = os.path.splitext(name)[0]
+        dirname = name
+        counter = 1
+        while os.path.exists(os.path.join(base, dirname)):
+            dirname = f"{name}-{counter}"
+            counter += 1
+        return os.path.join(base, dirname)
+
+    def _project_dir_from_name(self, name: str) -> str:
+        base = self._projects_base()
+        path = os.path.join(base, name)
+        counter = 1
+        orig = path
+        while os.path.exists(path):
+            path = f"{orig}-{counter}"
+            counter += 1
+        return path
+
+    def save_project_as(self, project_dir: str = "") -> str:
+        if not project_dir:
+            project_dir = self._default_project_dir()
+        elif "/" not in project_dir and "\\" not in project_dir:
+            project_dir = self._project_dir_from_name(project_dir)
+        self.project.save_as(project_dir)
+        self.workdir = project_dir
+        self._km = KeyManager(project_dir)
+        self._save_extract_results()
+        return self.project.path
+
+    def open_project_upload(self, content: dict, dir_name: str = ""):
+        tmp = os.path.join(self.workdir, "imported")
+        os.makedirs(tmp, exist_ok=True)
+        project_json = content.get("project.json")
+        if not project_json:
+            raise ValueError("上传文件中未找到 project.json")
+        proj_path = os.path.join(tmp, "project.json")
+        excel_data = content.get("template.xlsx")
+        if excel_data:
+            excel_path = os.path.join(tmp, "template.xlsx")
+            with open(excel_path, "wb") as f:
+                f.write(excel_data)
+            project_json["excel_path"] = excel_path
+        cache_data = content.get("cache.db")
+        if cache_data:
+            with open(os.path.join(tmp, "cache.db"), "wb") as f:
+                f.write(cache_data)
+        with open(proj_path, "w", encoding="utf-8") as f:
+            json.dump(project_json, f, ensure_ascii=False)
+        self.open_project(proj_path)
+        if dir_name:
+            dest = self._project_dir_from_name(dir_name)
+            self.save_project_as(dest)
 
     def state(self) -> dict:
         p = self.project
@@ -78,12 +224,16 @@ class ProjectService:
             "match_rule": p.match_rule.to_dict(),
             "selected_rows": p.selected_rows,
             "match_results": p.match_results,
-            "mineru_token": p.mineru_token,
-            "mineru_precision": p.mineru_precision,
             "ocr_provider": p.ocr_provider,
-            "baidu_api_key": p.baidu_api_key,
-            "baidu_secret_key": p.baidu_secret_key,
-            "llm_config": p.llm_config,
+            "mineru_token": "",
+            "mineru_token_set": self._key_set_bool(KEY_MINERU_TOKEN),
+            "mineru_precision": p.mineru_precision,
+            "baidu_api_key": "",
+            "baidu_api_key_set": self._key_set_bool(KEY_BAIDU_API_KEY),
+            "baidu_secret_key": "",
+            "baidu_secret_key_set": self._key_set_bool(KEY_BAIDU_SECRET_KEY),
+            "llm_config": {**p.llm_config, "api_key": ""},
+            "llm_key_set": self._key_set_bool(KEY_LLM_API_KEY),
             "has_results": bool(self.results),
         }
 
@@ -155,7 +305,7 @@ class ProjectService:
 
     # ---- step 3: OCR ----
     def set_mineru(self, token: str, precision: bool):
-        self.project.mineru_token = token
+        self._key_set(KEY_MINERU_TOKEN, token)
         self.project.mineru_precision = precision
 
     def set_ocr_config(
@@ -167,10 +317,10 @@ class ProjectService:
         baidu_secret_key: str = "",
     ):
         self.project.ocr_provider = provider
-        self.project.mineru_token = token
         self.project.mineru_precision = precision
-        self.project.baidu_api_key = baidu_api_key
-        self.project.baidu_secret_key = baidu_secret_key
+        self._key_set(KEY_MINERU_TOKEN, token)
+        self._key_set(KEY_BAIDU_API_KEY, baidu_api_key)
+        self._key_set(KEY_BAIDU_SECRET_KEY, baidu_secret_key)
 
     def _selected_files(self) -> list[tuple[int, str]]:
         matched = [r for r in self.project.match_results if r["matched"]]
@@ -181,7 +331,7 @@ class ProjectService:
 
     def ocr_table(self) -> list[dict]:
         rows = []
-        db_path = self.project.cache_db_path()
+        db_path = self._cache_db_path()
         cache = OcrCache(db_path) if db_path and os.path.exists(db_path) else None
         matched = [r for r in self.project.match_results if r["matched"]]
         selected = set(self.project.selected_rows) if self.project.selected_rows else {
@@ -202,7 +352,7 @@ class ProjectService:
         return rows
 
     def ocr_preview(self, row_index: int) -> str:
-        db_path = self.project.cache_db_path()
+        db_path = self._cache_db_path()
         if not db_path or not os.path.exists(db_path):
             return ""
         fp = next(
@@ -221,7 +371,7 @@ class ProjectService:
         return "等待处理"
 
     def start_ocr(self) -> str:
-        db_path = self.project.cache_db_path()
+        db_path = self._cache_db_path()
         if not db_path:
             raise ValueError("请先保存项目")
         files = [fp for _, fp in self._selected_files()]
@@ -229,11 +379,11 @@ class ProjectService:
             raise ValueError("没有选中的 PDF 文件")
 
         engine = create_engine(
-            token=self.project.mineru_token,
+            token=self._key_get(KEY_MINERU_TOKEN),
             use_precision=self.project.mineru_precision,
             provider=self.project.ocr_provider,
-            baidu_api_key=self.project.baidu_api_key,
-            baidu_secret_key=self.project.baidu_secret_key,
+            baidu_api_key=self._key_get(KEY_BAIDU_API_KEY),
+            baidu_secret_key=self._key_get(KEY_BAIDU_SECRET_KEY),
         )
         job = Job("ocr")
         job.total = len(files)
@@ -277,18 +427,26 @@ class ProjectService:
     # ---- step 4: extract ----
     def set_llm(self, base_url: str, api_key: str, model: str):
         self.project.update_llm_config(base_url, api_key, model)
+        self._key_set(KEY_LLM_API_KEY, api_key)
+
+    def _resolve_llm_config(self) -> dict:
+        cfg = dict(self.project.llm_config)
+        if not cfg.get("api_key"):
+            cfg["api_key"] = self._key_get(KEY_LLM_API_KEY)
+        return cfg
 
     def start_extract(self) -> str:
-        if not self.project.llm_config.get("base_url"):
+        llm_cfg = self._resolve_llm_config()
+        if not llm_cfg.get("base_url"):
             raise ValueError("请先配置 LLM")
         selected = self._selected_files()
         if not selected:
             raise ValueError("请选择要处理的行")
 
-        db_path = self.project.cache_db_path()
+        db_path = self._cache_db_path()
         reader = ExcelReader(self.project.excel_path)
         df = reader.get_data()
-        llm_client = LlmClient.from_config(self.project.llm_config)
+        llm_client = LlmClient.from_config(llm_cfg)
 
         extract_fields = [f for f in self.project.fields if f.selected and not f.is_context]
         context_names = [f.name for f in self.project.fields if f.is_context]
@@ -304,16 +462,19 @@ class ProjectService:
         self.jobs[job.id] = job
 
         def run():
-            cache = OcrCache(db_path)
+            cache = OcrCache(db_path) if db_path and os.path.exists(db_path) else None
             try:
                 for i, (row_idx, file_path, row_data) in enumerate(rows):
                     try:
-                        entry = cache.get(file_path)
-                        ocr_text = entry.markdown if entry and entry.markdown else ""
+                        ocr_text = ""
+                        if cache:
+                            entry = cache.get(file_path)
+                            ocr_text = entry.markdown if entry and entry.markdown else ""
                         messages = builder.build_messages(ocr_text, row_data)
                         result = llm_client.extract_json(messages)
                         with self._lock:
                             self.results[row_idx] = result or {}
+                            self._save_extract_results()
                     except Exception as e:
                         with self._lock:
                             self.results[row_idx] = {"_error": str(e)}
@@ -321,7 +482,8 @@ class ProjectService:
             except Exception as e:
                 job.error = str(e)
             finally:
-                cache.close()
+                if cache:
+                    cache.close()
                 job.done = True
 
         job.thread = threading.Thread(target=run, daemon=True)
@@ -375,6 +537,7 @@ class ProjectService:
             data = self.results.setdefault(row_index, {})
             fd = data.setdefault(field_name, {"value": "", "confidence": "high"})
             fd["value"] = value
+            self._save_extract_field(row_index, field_name, value, fd.get("confidence", "high"))
 
     def export(self, output_path: str = "") -> str:
         if not self.results:

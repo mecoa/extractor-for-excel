@@ -8,8 +8,8 @@ header {
   padding: 12px 24px; background: #fff; border-bottom: 1px solid #e0e0e0;
 }
 .brand { font-size: 18px; font-weight: bold; color: #0078d4; }
-.project-actions { display: flex; gap: 8px; }
-.project-actions input { width: 240px; }
+.project-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.path-display { font-size: 12px; color: #666; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 nav#stepper {
   display: flex; justify-content: center; gap: 8px;
@@ -84,3 +84,5 @@ td input[type=text]:focus { border-color: #4a90d9; background: #fff; }
   opacity: 0; transition: opacity .3s; pointer-events: none;
 }
 #toast.show { opacity: 1; }
+
+

@@ -37,7 +37,10 @@ def client():
 def test_state_empty(client):
     r = client.get("/api/state")
     assert r.status_code == 200
-    assert r.json()["excel_path"] == ""
+    data = r.json()
+    assert data["excel_path"] == ""
+    assert data["mineru_token_set"] is False
+    assert data["llm_key_set"] is False
 
 
 def test_load_excel(client, excel_file):
@@ -152,6 +155,41 @@ def test_project_save_and_open(client, excel_file, tmp_path):
     r2 = client.post("/api/project/open", json={"path": proj_path})
     assert r2.status_code == 200
     assert r2.json()["excel_path"] == excel_file
+    assert r2.json()["mineru_token_set"] is False
+
+
+def test_save_project_as(client, excel_file, tmp_path):
+    client.post("/api/excel/load", json={"path": excel_file})
+    proj_dir = str(tmp_path / "my_project")
+    r = client.post("/api/project/save-as", json={"path": proj_dir})
+    assert r.status_code == 200
+    assert os.path.isdir(proj_dir)
+    assert os.path.isfile(os.path.join(proj_dir, "project.json"))
+    assert os.path.isfile(os.path.join(proj_dir, "template.xlsx"))
+    loaded_path = os.path.join(proj_dir, "project.json")
+    r2 = client.post("/api/project/open", json={"path": loaded_path})
+    assert r2.status_code == 200
+    expected = os.path.join(proj_dir, "template.xlsx")
+    assert r2.json()["excel_path"] == expected
+
+
+def test_save_project_as_keys_persist(client, excel_file, tmp_path):
+    client.post("/api/excel/load", json={"path": excel_file})
+    proj_dir = str(tmp_path / "key_test")
+    client.post("/api/project/save-as", json={"path": proj_dir})
+    client.post("/api/mineru/config", json={
+        "provider": "mineru", "token": "sk-test-token", "precision": False,
+        "baidu_api_key": "baidu-key", "baidu_secret_key": "baidu-secret",
+    })
+    keys_file = os.path.join(proj_dir, "project.keys.json")
+    assert os.path.isfile(keys_file)
+    loaded_path = os.path.join(proj_dir, "project.json")
+    r = client.post("/api/project/open", json={"path": loaded_path})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["mineru_token_set"] is True
+    assert data["baidu_api_key_set"] is True
+    assert data["baidu_secret_key_set"] is True
 
 
 def test_export_no_results_fails(client, excel_file):
@@ -164,3 +202,57 @@ def test_service_update_field():
     svc = ProjectService()
     svc.update_field(0, "金额", "100")
     assert svc.results[0]["金额"]["value"] == "100"
+
+
+def test_new_project_as(client):
+    r = client.post("/api/project/new-as", json={"path": "my-proj"})
+    assert r.status_code == 200
+    path = r.json()["path"]
+    assert "my-proj" in path
+    assert path.endswith("project.json")
+    assert "Documents/extractor-projects" in path
+    assert os.path.isdir(os.path.dirname(path))
+    s = client.get("/api/state").json()
+    assert s["path"] == path
+
+def test_open_project_upload(client, excel_file, tmp_path):
+    client.post("/api/excel/load", json={"path": excel_file})
+    proj_dir = str(tmp_path / "open_upload_test")
+    client.post("/api/project/save-as", json={"path": proj_dir})
+    proj_json = os.path.join(proj_dir, "project.json")
+    with open(proj_json) as f:
+        import json; data = json.load(f)
+    r = client.post("/api/project/open/upload", files=[
+        ("files", ("imported/project.json", json.dumps(data).encode("utf-8"))),
+    ])
+    assert r.status_code == 200
+    state = r.json()
+    assert state["excel_path"] != ""
+    assert "Documents/extractor-projects" in state["path"]
+
+def test_fs_list(client, tmp_path):
+    r = client.post("/api/fs/list", json={"path": str(tmp_path)})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["current"] == str(tmp_path)
+    assert "entries" in data
+
+def test_fs_list_nonexistent(client):
+    r = client.post("/api/fs/list", json={"path": "/i_dont_exist_xyz"})
+    assert r.status_code == 400
+
+def test_fs_list_home(client):
+    r = client.post("/api/fs/list", json={"path": ""})
+    assert r.status_code == 200
+    assert r.json()["current"] != ""
+
+def test_key_manager_fallback(tmp_path):
+    from core.keyring_manager import KeyManager
+    km = KeyManager(str(tmp_path))
+    km.set("mineru_token", "sk-test")
+    assert km.get("mineru_token") == "sk-test"
+    keys_file = os.path.join(str(tmp_path), "project.keys.json")
+    assert os.path.isfile(keys_file)
+    km2 = KeyManager(str(tmp_path))
+    assert km2.get("mineru_token") == "sk-test"
+    assert km2.get("nonexistent") is None

@@ -3,7 +3,7 @@ import glob
 import pandas as pd
 from string import Formatter
 from typing import List, Dict, Tuple
-from models.field import MatchRule
+from app.models.field import MatchRule
 
 
 class FilenameMatcher:

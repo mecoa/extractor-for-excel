@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 from typing import List, Optional
-from models.field import FieldDef, MatchRule
+from app.models.field import FieldDef, MatchRule
 
 
 class Project:

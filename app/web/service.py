@@ -7,18 +7,18 @@ import threading
 import uuid
 from typing import Optional
 
-from core.project import Project
-from core.excel.reader import ExcelReader
-from core.matcher import FilenameMatcher
-from core.ocr.mineru_engine import create_engine
-from core.storage import OcrCache, ResultCache
-from core.keyring_manager import KeyManager
-from core.extract.llm_client import LlmClient
-from core.extract.prompt_builder import PromptBuilder
-from core.excel.writer import ExcelWriter
-from models.field import FieldDef, Confidence
-from models.ocr_cache import OcrCacheEntry, OcrStatus
-from models.extract_result import ExtractResult, FieldResult
+from app.core.project import Project
+from app.core.excel.reader import ExcelReader
+from app.core.matcher import FilenameMatcher
+from app.core.ocr.mineru_engine import create_engine
+from app.core.storage import OcrCache, ResultCache
+from app.core.keyring_manager import KeyManager
+from app.core.extract.llm_client import LlmClient
+from app.core.extract.prompt_builder import PromptBuilder
+from app.core.excel.writer import ExcelWriter
+from app.models.field import FieldDef, Confidence
+from app.models.ocr_cache import OcrCacheEntry, OcrStatus
+from app.models.extract_result import ExtractResult, FieldResult
 
 
 KEY_MINERU_TOKEN = "mineru_token"

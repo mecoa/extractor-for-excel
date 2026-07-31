@@ -1,7 +1,7 @@
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-from models.extract_result import ExtractResult
-from models.field import Confidence
+from app.models.extract_result import ExtractResult
+from app.models.field import Confidence
 
 
 CONFIDENCE_FILLS = {

@@ -8,7 +8,7 @@ Built with FastAPI (web backend + single-page frontend), using MinerU cloud API 
 
 ## Tech Stack
 
-- **UI**: FastAPI + vanilla JS single-page frontend (custom stepper in `web/static/`)
+- **UI**: FastAPI + vanilla JS single-page frontend (custom stepper in `app/web/static/`)
 - **Package management**: uv (`uv sync && uv run python web_main.py`)
 - **Excel**: openpyxl (write) + pandas (read)
 - **HTTP**: httpx
@@ -17,41 +17,46 @@ Built with FastAPI (web backend + single-page frontend), using MinerU cloud API 
 
 ## Architecture
 
-The web layer wraps the same `core/` business logic:
-- **WebUI (FastAPI)**: `web_main.py` → `web/server.py` → `web/service.py` (+ `web/static/`)
+The web layer wraps the same `app/core/` business logic:
+- **WebUI (FastAPI)**: `web_main.py` → `app.web.server` → `app.web.service` (+ `app/web/static/`)
 
-`web/service.py` is a `ProjectService` wrapper around `Project` + `core/` that manages
+`app/web/service.py` is a `ProjectService` wrapper around `Project` + `app/core/` that manages
 state and background jobs (OCR/extract) with progress polling via `/api/job/{id}`.
 It's fully headless-testable via pytest (`tests/test_api.py`). Uploaded Excel/PDF files
 land in a per-session temp workdir, so no local path typing is required.
 
+All backend Python code lives under `app/`. Entry points (`web_main.py`, `desktop_main.py`)
+stay at the project root for `uv run` and PyInstaller.
+
 ```
 web_main.py                 web entry point (uvicorn)
-web/
-  server.py                 FastAPI routes (/api/*), upload endpoints, serves static/
-  service.py                ProjectService — core wrapper + job runner + upload handling
-  static/                   single-page frontend (index.html, app.js, style.css)
+desktop_main.py             Windows exe entry (PyInstaller)
+app/
+  web/
+    server.py               FastAPI routes (/api/*), upload endpoints, serves static/
+    service.py              ProjectService — core wrapper + job runner + upload handling
+    static/                 single-page frontend (index.html, app.js, style.css)
+  core/                     business logic
+    ocr/
+      engine.py             OcrEngine abstract class
+      mineru_engine.py      MinerU cloud API (Flash/Precision engines)
+      cache.py              SQLite OCR result cache (check_same_thread=False)
+    extract/
+      llm_client.py         OpenAI-compatible API client
+      prompt_builder.py     Builds prompts from field defs + OCR text + context
+    excel/
+      reader.py             pandas-based Excel reader
+      writer.py             openpyxl writer with confidence color fills
+    matcher.py              Filename broadcast matching engine
+    project.py              Project configuration (save/load .json)
+    storage.py              OcrCache + ResultCache (SQLite extract results persistence)
+    keyring_manager.py      KeyManager — OS keyring + project.keys.json fallback
+  models/                   data models
+    field.py                FieldDef, Confidence, MatchRule
+    ocr_cache.py            OcrCacheEntry, OcrStatus
+    extract_result.py       ExtractResult, FieldResult
 tests/
   test_api.py               pytest API tests (TestClient)
-core/                       business logic
-  ocr/
-    engine.py               OcrEngine abstract class
-    mineru_engine.py        MinerU cloud API (Flash/Precision engines)
-    cache.py                SQLite OCR result cache (check_same_thread=False)
-  extract/
-    llm_client.py           OpenAI-compatible API client
-    prompt_builder.py       Builds prompts from field defs + OCR text + context
-  excel/
-    reader.py               pandas-based Excel reader
-    writer.py               openpyxl writer with confidence color fills
-  matcher.py                Filename broadcast matching engine
-  project.py                Project configuration (save/load .json)
-  storage.py                OcrCache + ResultCache (SQLite extract results persistence)
-  keyring_manager.py        KeyManager — OS keyring + project.keys.json fallback
-models/                     data models
-  field.py                  FieldDef, Confidence, MatchRule
-  ocr_cache.py              OcrCacheEntry, OcrStatus
-  extract_result.py         ExtractResult, FieldResult
 ```
 
 ## Key Design Decisions
@@ -82,15 +87,15 @@ Four levels: `high` / `medium` / `low` / `missing`. LLM is instructed to output 
 - **新建**：`webkitdirectory` 选目录 → 取其名 → 创建到 `~/Documents/extractor-projects/{名}/`
 - **打开**：`webkitdirectory` 选目录 → 上传 `project.json`/`cache.db`/`template.xlsx` → 自动导入到 managed 目录
 - **PDF 不拷贝进项目目录**: 只保留绝对路径引用。重新打开时如果目录还在则直接复用 OCR 缓存（不重复 OCR）。
-- **密钥管理**: `core/keyring_manager.py` → `KeyManager`。优先 OS keyring（GNOME Keyring / macOS Keychain），降级到 `{project_dir}/project.keys.json`（chmod 600）。`project.json` 不写任何密钥字段。
+- **密钥管理**: `app/core/keyring_manager.py` → `KeyManager`。优先 OS keyring（GNOME Keyring / macOS Keychain），降级到 `{project_dir}/project.keys.json`（chmod 600）。`project.json` 不写任何密钥字段。
 
 ### SQLite threading
 
-Cache connections use `check_same_thread=False`. Background job threads (OCR/extract) in `web/service.py` share the DB safely.
+Cache connections use `check_same_thread=False`. Background job threads (OCR/extract) in `app/web/service.py` share the DB safely.
 
 ### Extract result persistence
 
-`core/storage.py` 中的 `ResultCache` 将提取结果持久化到 `cache.db` 的 `extract_results` 表：
+`app/core/storage.py` 中的 `ResultCache` 将提取结果持久化到 `cache.db` 的 `extract_results` 表：
 ```sql
 CREATE TABLE extract_results (
     row_index INTEGER NOT NULL,
@@ -173,9 +178,9 @@ Manual core checks:
 
 ```bash
 uv run python -c "
-from models.field import Confidence
+from app.models.field import Confidence
 assert Confidence.from_ocr(0.95) == Confidence.HIGH
-from core.matcher import FilenameMatcher
+from app.core.matcher import FilenameMatcher
 # ... (see git log for test snippets)
 "
 ```

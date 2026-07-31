@@ -25,7 +25,7 @@ def main():
 
     threading.Timer(1.5, _open_browser).start()
 
-    from web.server import app
+    from app.web.server import app
 
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 

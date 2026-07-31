@@ -2,7 +2,7 @@ import json
 import sqlite3
 import os
 from typing import Optional, List
-from models.ocr_cache import OcrCacheEntry, OcrStatus
+from app.models.ocr_cache import OcrCacheEntry, OcrStatus
 
 
 class OcrCache:

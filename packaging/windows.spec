@@ -6,7 +6,7 @@
 # 产物: dist/ExtractorForExcel.exe
 #
 # 说明:
-#   - datas 把前端 web/static 打进 exe (运行时解包到 sys._MEIPASS/web/static)
+#   - datas 把前端 app/web/static 打进 exe (运行时解包到 sys._MEIPASS/app/web/static)
 #   - hiddenimports 覆盖 uvicorn / pandas / openpyxl 的动态导入
 import os
 
@@ -22,12 +22,13 @@ hiddenimports += collect_submodules("uvicorn")
 hiddenimports += collect_submodules("pandas")
 hiddenimports += collect_submodules("openpyxl")
 hiddenimports += [
-    "core", "models", "web",
-    "web.server", "web.service",
+    "app", "app.core", "app.models", "app.web",
+    "app.web.server", "app.web.service",
+    "app.core.ocr", "app.core.extract", "app.core.excel",
 ]
 
 datas = [
-    (os.path.join(ROOT, "web", "static"), os.path.join("web", "static")),
+    (os.path.join(ROOT, "app", "web", "static"), os.path.join("app", "web", "static")),
 ]
 datas += collect_data_files("openpyxl")
 

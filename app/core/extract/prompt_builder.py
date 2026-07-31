@@ -1,5 +1,5 @@
 from typing import List, Dict
-from models.field import FieldDef, Confidence
+from app.models.field import FieldDef, Confidence
 
 
 class PromptBuilder:

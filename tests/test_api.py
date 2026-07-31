@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from web.server import create_app
-from web.service import ProjectService
+from app.web.server import create_app
+from app.web.service import ProjectService
 
 
 @pytest.fixture
@@ -247,7 +247,7 @@ def test_fs_list_home(client):
     assert r.json()["current"] != ""
 
 def test_key_manager_fallback(tmp_path):
-    from core.keyring_manager import KeyManager
+    from app.core.keyring_manager import KeyManager
     km = KeyManager(str(tmp_path))
     km.set("mineru_token", "sk-test")
     assert km.get("mineru_token") == "sk-test"

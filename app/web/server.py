@@ -8,14 +8,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from web.service import ProjectService
+from app.web.service import ProjectService
 
 
 def _static_dir() -> str:
     # PyInstaller 解包目录（onefile 模式解压到 sys._MEIPASS）
     base = getattr(sys, "_MEIPASS", None)
     if base:
-        bundled = os.path.join(base, "web", "static")
+        bundled = os.path.join(base, "app", "web", "static")
         if os.path.isdir(bundled):
             return bundled
     return os.path.join(os.path.dirname(__file__), "static")
